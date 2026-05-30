@@ -70,3 +70,4 @@ Create `ezauto.json` in the same folder:
   "default_ime": "LastUsed",
   "auto_detect": true
 }
+```
