@@ -33,6 +33,8 @@ This has been a **known Windows issue for over a decade**. Microsoft hasn't fixe
 
 ## ✨ The Solution: EZAuto
 
+![img](assets/ezauto_screen.gif)
+
 **EZAuto completely bypasses Windows' broken IME management.**
 
 EZAuto ensures the **right input method** is always active — based on **which window** you're using.
@@ -44,12 +46,15 @@ EZAuto ensures the **right input method** is always active — based on **which 
 ## 🚀 Quick Start
 
 ### 1. Download
+
 Download `EZAuto.exe` from [Releases](https://github.com/Bitpulses/ezauto/releases)
 
 ### 2. Run
+
 Double-click `EZAuto.exe`
 
 ### 3. It just works
+
 Switch between windows. EZAuto changes input method automatically.
 
 **That's it. No config needed.**
