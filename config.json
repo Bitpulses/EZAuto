@@ -29,6 +29,7 @@
         "nvim-qt.exe": "english",
         "sublime_text.exe": "english",
         "explorer.exe": "english",
+        "githubdesktop.exe": "english",
 
         "excel.exe": "english"
     }
