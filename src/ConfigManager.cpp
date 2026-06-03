@@ -44,6 +44,7 @@ void ConfigManager::setDefaults() {
         // Dev tools
         {"git.exe", ImeMode::English},
         {"ssh.exe", ImeMode::English},
+        {"githubdesktop.exe", ImeMode::English},
     };
 }
 
