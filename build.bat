@@ -2,9 +2,10 @@
 echo Building EZAuto...
 
 set GCC_PATH=D:\Software\msys64\ucrt64\bin
+#set GCC_PATH=D:\MySoftware\MSYS2\ucrt64\bin
 set PATH=%GCC_PATH%;%PATH%
 
-g++ -std=c++17 -O2 -o release/EZAuto.exe ^
+g++ -std=c++17 -O2 -static -o release/EZAuto.exe ^
     src/main.cpp ^
     src/FocusMonitor.cpp ^
     src/ImeSwitcher.cpp ^
