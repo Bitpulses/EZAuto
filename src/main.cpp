@@ -54,7 +54,7 @@ struct FocusState {
 
 int main() {
     std::cout << "========================================" << std::endl;
-    std::cout << "  EZAuto v1.0 - Auto IME Switcher" << std::endl;
+    std::cout << "  EZAuto v0.1.4 - Auto IME Switcher" << std::endl;
     std::cout << "========================================" << std::endl;
 
     SetConsoleCtrlHandler(ConsoleHandler, TRUE);
