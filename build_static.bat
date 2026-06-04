@@ -1,7 +1,8 @@
 @echo off
-echo Building EZAuto...
+echo Building EZAuto static ...
 
 set GCC_PATH=D:\Software\msys64\ucrt64\bin
+:: set GCC_PATH=D:\MySoftware\MSYS2\ucrt64\bin
 set PATH=%GCC_PATH%;%PATH%
 
 g++ -std=c++17 -O2 -static -o release/EZAuto_static.exe ^
