@@ -11,7 +11,7 @@
 
 ---
 
-## 📌 The Problem: Windows IME is Broken
+## 📌 The Problem: Windows IME Switcher is Broken
 
 You're working in **VS Code**, typing English — everything is fine.
 
