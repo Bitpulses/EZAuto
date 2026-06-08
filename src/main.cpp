@@ -10,11 +10,12 @@
 #include <EZAuto/Types.h>
 
 static volatile bool g_running = true;
+static DWORD g_mainThreadId = 0;
 
 BOOL WINAPI ConsoleHandler(DWORD signal) {
     if (signal == CTRL_C_EVENT || signal == CTRL_BREAK_EVENT) {
         g_running = false;
-        PostThreadMessage(GetCurrentThreadId(), WM_QUIT, 0, 0);
+        PostThreadMessage(g_mainThreadId, WM_QUIT, 0, 0);
         return TRUE;
     }
     return FALSE;
@@ -42,7 +43,7 @@ static std::string getExeDirectory() {
 //   (windowsterminal.exe) and child processes (openconsole.exe, cmd.exe).
 //   UIA focus events may report different PIDs within the same app,
 //   causing false "app switch" detection with process-level tracking.
-// - Using GetAncestor(GA_ROOT) gives us the actual top-level window,
+// - Using GetAncestor(GA_ROOTOWNER) gives us the actual top-level owner window,
 //   which is stable regardless of which child process has focus.
 // - This also correctly handles Chrome, VS Code, and other apps that
 //   use utility processes for different UI elements.
@@ -53,6 +54,8 @@ struct FocusState {
 };
 
 int main() {
+    g_mainThreadId = GetCurrentThreadId();
+
     std::cout << "========================================" << std::endl;
     std::cout << "  EZAuto v0.1.4 - Auto IME Switcher" << std::endl;
     std::cout << "========================================" << std::endl;
@@ -107,7 +110,7 @@ int main() {
         // Get the top-level window (root owner) for stable app identity
         HWND rootHwnd = nullptr;
         if (info.hwnd) {
-            rootHwnd = GetAncestor(info.hwnd, GA_ROOT);
+            rootHwnd = GetAncestor(info.hwnd, GA_ROOTOWNER);
         }
         if (!rootHwnd) {
             rootHwnd = GetForegroundWindow();
