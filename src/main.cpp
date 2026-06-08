@@ -21,6 +21,15 @@ BOOL WINAPI ConsoleHandler(DWORD signal) {
     return FALSE;
 }
 
+static std::string getTimestamp() {
+    SYSTEMTIME st;
+    GetLocalTime(&st);
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%02d:%02d:%02d.%03d",
+             st.wHour, st.wMinute, st.wSecond, st.wMilliseconds);
+    return buf;
+}
+
 static std::string getExeDirectory() {
     char path[MAX_PATH] = {};
     GetModuleFileNameA(NULL, path, MAX_PATH);
@@ -124,7 +133,7 @@ int main() {
         // This also handles multi-process apps (Windows Terminal, Chrome, etc.)
         // where child processes report different PIDs but share the same root window.
         if (sameApp) {
-            std::cout << "[Focus] " << info.processName
+            std::cout << "[" << getTimestamp() << "] [Focus] " << info.processName
                       << " | Ctrl: " << ctrlType
                       << " | PID: " << info.processId
                       << " | [SAME APP, skip]" << std::endl;
@@ -143,7 +152,7 @@ int main() {
         lastState.rootHwnd = rootHwnd;
         lastState.processName = info.processName;
 
-        std::cout << "[Focus] " << info.processName
+        std::cout << "[" << getTimestamp() << "] [Focus] " << info.processName
                   << " | Ctrl: " << ctrlType
                   << " | PID: " << info.processId
                   << " | RootHwnd: " << rootHwnd
