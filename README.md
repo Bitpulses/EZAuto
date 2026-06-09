@@ -7,7 +7,6 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Windows](https://img.shields.io/badge/Platform-Windows-0078d4.svg)](https://www.microsoft.com/windows)
 [![Build Status](https://img.shields.io/badge/build-passing-brightgreen.svg)]()
-[![GitHub Stars](https://img.shields.io/badge/stars-0-blue.svg)]()
 
 ---
 
