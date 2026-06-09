@@ -47,11 +47,11 @@ EZAuto ensures the **right input method** is always active — based on **which 
 
 ### 1. Download
 
-Download `EZAuto.exe` from [Releases](https://github.com/Bitpulses/ezauto/releases)
+Download `EZAuto.exe` from [Releases](https://github.com/Bitpulses/EZAuto/releases/)
 
 ### 2. Run
 
-Double-click `EZAuto.exe`
+Double-click `EZAuto_static.exe`
 
 ### 3. It just works
 
