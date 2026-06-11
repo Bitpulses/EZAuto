@@ -98,6 +98,18 @@ int main() {
     if (!monitor.start([&config, &switcher, &lastState, &stateMutex](const FocusInfo& info) {
         std::lock_guard<std::mutex> lock(stateMutex);
 
+        // FIX 1: Filter UIA intermediate/artifact events.
+        // UIA sometimes fires transient focus events with PID=0 or empty processName
+        // (e.g., Type_50025 CustomControl) that share the same rootHwnd as the real
+        // target app. If we let these through, they update lastState and cause the
+        // subsequent real event to be skipped as "[SAME APP, skip]".
+        if (info.processId == 0 || info.processName.empty()) {
+            std::cout << "[" << getTimestamp() << "] [Focus] ARTIFACT (PID="
+                      << info.processId << " name='" << info.processName
+                      << "') filtered" << std::endl;
+            return;
+        }
+
         // Build control type name for logging
         std::string ctrlType;
         switch (info.controlType) {
@@ -125,7 +137,13 @@ int main() {
             rootHwnd = GetForegroundWindow();
         }
 
-        bool sameApp = (rootHwnd != nullptr && rootHwnd == lastState.rootHwnd);
+        // FIX 2: Strengthen same-app detection with both rootHwnd AND processName.
+        // Previously only rootHwnd was used, which could cause false matches when
+        // an artifact event (with same rootHwnd but empty processName) leaked through
+        // and updated lastState before the real event arrived.
+        bool sameApp = (rootHwnd != nullptr && !info.processName.empty()
+                        && rootHwnd == lastState.rootHwnd
+                        && info.processName == lastState.processName);
 
         // ---- Same top-level window: DO NOT touch IME ----
         // User may have manually switched IME, or IME state may be in flux
@@ -162,7 +180,10 @@ int main() {
                   << " -> " << (targetMode == ImeMode::Chinese ? "CN" : "EN");
 
         if (currentMode != targetMode) {
-            switcher.switchTo(targetMode, targetHwnd, config.getSwitchMethod());
+            // FIX 3: Pass detected currentMode so switchTo doesn't need to re-detect
+            // (eliminates race where GetForegroundWindow() after Sleep(50) may return
+            // a different window than the one we intended to switch).
+            switcher.switchTo(targetMode, targetHwnd, currentMode, config.getSwitchMethod());
             std::cout << " [SWITCHED]";
         } else {
             std::cout << " [OK]";
