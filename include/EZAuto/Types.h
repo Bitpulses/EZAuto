@@ -25,7 +25,6 @@ struct FocusInfo {
     std::string processName;   // lowercase, e.g. "cmd.exe"
     CONTROLTYPEID controlType = 0;
     bool isPassword = false;
-    bool isEditable = false;
     HWND hwnd = nullptr;
     std::vector<int> runtimeId;  // UIA RuntimeId for unique element identification
 };
