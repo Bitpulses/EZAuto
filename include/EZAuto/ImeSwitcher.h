@@ -13,8 +13,11 @@ public:
     // Detect current IME mode for the given window
     ImeMode getCurrentMode(HWND hwnd);
 
-    // Switch to target mode if needed
-    void switchTo(ImeMode targetMode, HWND hwnd, SwitchMethod method = SwitchMethod::Shift);
+    // Switch to target mode if needed.
+    // currentMode: the already-detected mode (caller should pass this to avoid
+    //              re-detection race after Sleep delay).
+    void switchTo(ImeMode targetMode, HWND hwnd, ImeMode currentMode,
+                  SwitchMethod method = SwitchMethod::Shift);
 
 private:
     // ---- Detection Methods ----
