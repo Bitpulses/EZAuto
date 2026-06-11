@@ -3,6 +3,7 @@
 #include <string>
 #include <csignal>
 #include <mutex>
+#include <algorithm>
 
 #include <EZAuto/ConfigManager.h>
 #include <EZAuto/FocusMonitor.h>
@@ -41,6 +42,46 @@ static std::string getExeDirectory() {
     return dir;
 }
 
+// Helper: convert wide string to UTF-8
+static std::string wideToUtf8(const std::wstring& wide) {
+    if (wide.empty()) return "";
+    int len = WideCharToMultiByte(CP_UTF8, 0, wide.c_str(), (int)wide.size(), nullptr, 0, nullptr, nullptr);
+    if (len <= 0) return "";
+    std::string result(len, '\0');
+    WideCharToMultiByte(CP_UTF8, 0, wide.c_str(), (int)wide.size(), &result[0], len, nullptr, nullptr);
+    return result;
+}
+
+// Helper: get window title (truncated for logging, UTF-8)
+static std::string getWindowTitle(HWND hwnd) {
+    if (!hwnd) return "";
+    wchar_t buf[256] = {};
+    int len = GetWindowTextW(hwnd, buf, 256);
+    if (len == 0) return "";
+    std::string title = wideToUtf8(std::wstring(buf, len));
+    if (title.length() > 60) {
+        title = title.substr(0, 57) + "...";
+    }
+    return title;
+}
+
+// Helper: get window class name (UTF-8)
+static std::string getWindowClass(HWND hwnd) {
+    if (!hwnd) return "";
+    wchar_t buf[256] = {};
+    int len = GetClassNameW(hwnd, buf, 256);
+    if (len == 0) return "";
+    return wideToUtf8(std::wstring(buf, len));
+}
+
+// Helper: format HWND as hex string
+static std::string hwndStr(HWND hwnd) {
+    if (!hwnd) return "null";
+    char buf[20];
+    snprintf(buf, sizeof(buf), "0x%llx", reinterpret_cast<unsigned long long>(hwnd));
+    return buf;
+}
+
 // ===================== Focus State Tracker =====================
 //
 // CORE PRINCIPLE: Only switch IME when the user moves to a DIFFERENT
@@ -63,6 +104,10 @@ struct FocusState {
 };
 
 int main() {
+    // Set console to UTF-8 mode so Unicode box-drawing characters display correctly
+    SetConsoleOutputCP(CP_UTF8);
+    SetConsoleCP(CP_UTF8);
+
     g_mainThreadId = GetCurrentThreadId();
 
     std::cout << "========================================" << std::endl;
@@ -104,9 +149,8 @@ int main() {
         // target app. If we let these through, they update lastState and cause the
         // subsequent real event to be skipped as "[SAME APP, skip]".
         if (info.processId == 0 || info.processName.empty()) {
-            std::cout << "[" << getTimestamp() << "] [Focus] ARTIFACT (PID="
-                      << info.processId << " name='" << info.processName
-                      << "') filtered" << std::endl;
+            std::cout << "[" << getTimestamp() << "] Focus ── ARTIFACT (PID="
+                      << info.processId << ") → filtered" << std::endl;
             return;
         }
 
@@ -128,23 +172,6 @@ int main() {
             default: ctrlType = "Type_" + std::to_string(info.controlType); break;
         }
 
-        // FIX 2: Skip non-editable focus events.
-        // IME switching only makes sense for editable areas where the user can type.
-        // Non-editable controls (menus, buttons, toolbars, tooltips, etc.) must NOT
-        // trigger IME switches or update lastState, because:
-        // 1. The user can't type in these areas, so IME mode is irrelevant
-        // 2. Popup menus and tooltips have their own top-level windows (different
-        //    rootHwnd from the parent app), causing false "different app" detection
-        // 3. This prevents the bug where right-click menus (e.g., MobaXterm's motty.exe)
-        //    cause unwanted IME switches when focus returns to the parent app
-        if (!info.isEditable) {
-            std::cout << "[" << getTimestamp() << "] [Focus] " << info.processName
-                      << " | Ctrl: " << ctrlType
-                      << " | PID: " << info.processId
-                      << " | [NON-EDITABLE, skip]" << std::endl;
-            return;
-        }
-
         // Get the top-level window (root owner) for stable app identity
         HWND rootHwnd = nullptr;
         if (info.hwnd) {
@@ -155,27 +182,13 @@ int main() {
         }
 
         // Same-app detection: compare rootHwnd only.
-        // Must NOT compare processName because multi-process apps (VS Code, Chrome,
-        // Windows Terminal) have child processes with different names sharing the same
-        // top-level window. Using processName would cause same-window events from
-        // different child processes to be treated as "different app", triggering
-        // unwanted IME switches that override the user's manual IME choice.
-        //
-        // Safety: PID=0 / empty-processName artifact events (which previously poisoned
-        // lastState.rootHwnd) are now filtered by the check above (FIX 1), so a
-        // rootHwnd-only comparison is safe.
         bool sameApp = (rootHwnd != nullptr && rootHwnd == lastState.rootHwnd);
 
-        // ---- Same top-level window: DO NOT touch IME ----
-        // User may have manually switched IME, or IME state may be in flux
-        // during Chinese text composition. Either way, we must not interfere.
-        // This also handles multi-process apps (Windows Terminal, Chrome, etc.)
-        // where child processes report different PIDs but share the same root window.
         if (sameApp) {
-            std::cout << "[" << getTimestamp() << "] [Focus] " << info.processName
-                      << " | Ctrl: " << ctrlType
-                      << " | PID: " << info.processId
-                      << " | [SAME APP, skip]" << std::endl;
+            std::cout << "[" << getTimestamp() << "] Focus ── " << info.processName
+                      << " (PID:" << info.processId << ", " << ctrlType << ")" << std::endl;
+            std::cout << " ├─ Hwnd: " << hwndStr(info.hwnd) << " | Root: " << hwndStr(rootHwnd) << std::endl;
+            std::cout << " └─ Same app" << std::endl;
             return;
         }
 
@@ -184,32 +197,58 @@ int main() {
         HWND targetHwnd = GetForegroundWindow();
         if (!targetHwnd) return;
 
-        ImeMode currentMode = switcher.getCurrentMode(targetHwnd);
+        // Determine rule source for logging
+        std::string ruleSource;
+        if (info.isPassword) {
+            ruleSource = "password → EN";
+        } else {
+            std::string lowerName = info.processName;
+            std::transform(lowerName.begin(), lowerName.end(), lowerName.begin(),
+                           [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+            const auto& rules = config.getRules();
+            auto it = rules.find(lowerName);
+            if (it != rules.end()) {
+                ruleSource = "rule:" + lowerName + " → " + (it->second == ImeMode::Chinese ? "CN" : "EN");
+            } else {
+                ruleSource = "default → " + std::string(config.getDefaultMode() == ImeMode::Chinese ? "CN" : "EN");
+            }
+        }
 
-        // Update state BEFORE switching (so that re-entrant events from our
-        // own switch operation see sameApp=true and get skipped)
+        DWORD targetTid = GetWindowThreadProcessId(targetHwnd, nullptr);
+
+        ImeMode currentMode = switcher.getCurrentMode(targetHwnd, false);
+
+        // Update state BEFORE switching
         lastState.rootHwnd = rootHwnd;
         lastState.processName = info.processName;
 
-        std::cout << "[" << getTimestamp() << "] [Focus] " << info.processName
-                  << " | Ctrl: " << ctrlType
-                  << " | PID: " << info.processId
-                  << " | RootHwnd: " << rootHwnd
-                  << " | Editable: " << (info.isEditable ? "Y" : "N")
-                  << " | Pwd: " << (info.isPassword ? "Y" : "N")
-                  << " | IME: " << (currentMode == ImeMode::Chinese ? "CN" : "EN")
-                  << " -> " << (targetMode == ImeMode::Chinese ? "CN" : "EN");
+        std::string currentStr = (currentMode == ImeMode::Chinese ? "CN" : "EN");
+        std::string targetStr = (targetMode == ImeMode::Chinese ? "CN" : "EN");
+
+        // Tree-style output with detailed info
+        std::cout << "\n[" << getTimestamp() << "] Focus ── " << info.processName
+                  << " (PID:" << info.processId << ", " << ctrlType << ")" << std::endl;
+        std::cout << " ├─ Hwnd: " << hwndStr(info.hwnd) << " | Root: " << hwndStr(rootHwnd)
+                  << " | TID:" << targetTid << std::endl;
+        std::cout << " ├─ Class: " << getWindowClass(rootHwnd)
+                  << " | Title: \"" << getWindowTitle(rootHwnd) << "\"" << std::endl;
+        std::cout << " ├─ Rule: " << ruleSource
+                  << " | IME: " << currentStr << " → " << targetStr << std::endl;
 
         if (currentMode != targetMode) {
+            std::cout << " ├─ Switch: " << currentStr << " → " << targetStr << std::endl;
             // FIX 3: Pass detected currentMode so switchTo doesn't need to re-detect
             // (eliminates race where GetForegroundWindow() after Sleep(50) may return
             // a different window than the one we intended to switch).
-            switcher.switchTo(targetMode, targetHwnd, currentMode, config.getSwitchMethod());
-            std::cout << " [SWITCHED]";
+            bool switched = switcher.switchTo(targetMode, targetHwnd, currentMode, config.getSwitchMethod());
+            if (switched) {
+                std::cout << " └─ ✓ SWITCHED" << std::endl;
+            } else {
+                std::cout << " └─ ✗ FAILED" << std::endl;
+            }
         } else {
-            std::cout << " [OK]";
+            std::cout << " └─ OK" << std::endl;
         }
-        std::cout << std::endl;
     })) {
         std::cerr << "Failed to start focus monitor!" << std::endl;
         CoUninitialize();
