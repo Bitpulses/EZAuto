@@ -128,6 +128,23 @@ int main() {
             default: ctrlType = "Type_" + std::to_string(info.controlType); break;
         }
 
+        // FIX 2: Skip non-editable focus events.
+        // IME switching only makes sense for editable areas where the user can type.
+        // Non-editable controls (menus, buttons, toolbars, tooltips, etc.) must NOT
+        // trigger IME switches or update lastState, because:
+        // 1. The user can't type in these areas, so IME mode is irrelevant
+        // 2. Popup menus and tooltips have their own top-level windows (different
+        //    rootHwnd from the parent app), causing false "different app" detection
+        // 3. This prevents the bug where right-click menus (e.g., MobaXterm's motty.exe)
+        //    cause unwanted IME switches when focus returns to the parent app
+        if (!info.isEditable) {
+            std::cout << "[" << getTimestamp() << "] [Focus] " << info.processName
+                      << " | Ctrl: " << ctrlType
+                      << " | PID: " << info.processId
+                      << " | [NON-EDITABLE, skip]" << std::endl;
+            return;
+        }
+
         // Get the top-level window (root owner) for stable app identity
         HWND rootHwnd = nullptr;
         if (info.hwnd) {
