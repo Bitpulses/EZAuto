@@ -21,6 +21,37 @@
 #define IMC_SETOPENSTATUS      0x0004
 #endif
 
+// Helper: format DWORD as hex string
+static std::string hexStr(DWORD val) {
+    char buf[16];
+    snprintf(buf, sizeof(buf), "0x%x", val);
+    return buf;
+}
+
+// Helper: format HWND as hex string
+static std::string hwndStr(HWND hwnd) {
+    if (!hwnd) return "null";
+    char buf[20];
+    snprintf(buf, sizeof(buf), "0x%llx", reinterpret_cast<unsigned long long>(hwnd));
+    return buf;
+}
+
+// Helper: decode convMode flags into readable string
+static std::string convModeDesc(DWORD convMode) {
+    std::string flags;
+    if (convMode & IME_CMODE_NATIVE)     flags += "NATIVE|";
+    if (convMode & IME_CMODE_KATAKANA)   flags += "KATAKANA|";
+    if (convMode & IME_CMODE_FULLSHAPE)  flags += "FULLSHAPE|";
+    if (convMode & IME_CMODE_ROMAN)      flags += "ROMAN|";
+    if (convMode & IME_CMODE_CHARCODE)   flags += "CHARCODE|";
+    if (convMode & IME_CMODE_SOFTKBD)    flags += "SOFTKBD|";
+    if (convMode & IME_CMODE_NOCONVERSION) flags += "NOCONV|";
+    if (convMode & IME_CMODE_EUDC)       flags += "EUDC|";
+    if (convMode & IME_CMODE_SYMBOL)     flags += "SYMBOL|";
+    if (!flags.empty()) flags.pop_back();  // Remove trailing '|'
+    return flags;
+}
+
 ImeSwitcher::ImeSwitcher() = default;
 ImeSwitcher::~ImeSwitcher() = default;
 
@@ -79,18 +110,6 @@ HIMC ImeSwitcher::acquireImmContext(HWND hwnd, DWORD threadId, HWND& outCtxHwnd)
 }
 
 //  IME-Control Helpers 
-//
-// WM_IME_CONTROL via the default IME window is the MOST RELIABLE way
-// to detect and switch IME mode for modern TSF-based apps (Chrome,
-// VS Code, Windows Terminal). These apps don't expose HIMC, so IMM
-// APIs don't work. But WM_IME_CONTROL is handled by the IME window
-// which is managed by TSF.
-//
-// IMPORTANT: Microsoft Pinyin in Windows 10/11 uses a SINGLE layout
-// (e.g., 0x4090409 English) for both CN and EN mode. The CN/EN state
-// is tracked by the IME's internal conversion mode (IME_CMODE_NATIVE
-// bit), NOT by the keyboard layout. So GetKeyboardLayout is USELESS
-// for detecting CN/EN mode with Microsoft Pinyin.
 
 HWND ImeSwitcher::getDefaultImeWnd(HWND hwnd) {
     if (!hwnd) return nullptr;
@@ -132,56 +151,56 @@ LRESULT ImeSwitcher::imeControlGetConvMode(HWND imeWnd, int maxRetries, int retr
                                      static_cast<WPARAM>(IMC_GETOPENSTATUS), 0);
     if (openStatus) {
         // IME is open but conversion mode is 0 => genuine English/alpha mode
-        std::cout << "  [IME-Control] GETCONVERSIONMODE=0 but IME is open => EN mode" << std::endl;
+        std::cout << logIndent_ << "├─ [IME-Control] " << hwndStr(imeWnd) << " convMode=0, IME open → EN" << std::endl;
         return 0;  // 0 is valid: English mode
     }
 
     // IME appears closed or query completely failed
-    std::cout << "  [IME-Control] Both GETCONVERSIONMODE and GETOPENSTATUS returned 0 (query failed)" << std::endl;
+    std::cout << logIndent_ << "├─ [IME-Control] " << hwndStr(imeWnd) << " both queries returned 0 (failed)" << std::endl;
     return -1;  // Use -1 as sentinel for "query failed"
 }
 
 //  Mode Detection 
-//
-// Detection priority (CHANGED from previous version):
-// 1. WM_IME_CONTROL / IMC_GETCONVERSIONMODE via default IME window
-//    - Works for TSF-based apps (Chrome, VS Code, Windows Terminal)
-//    - Correctly reads IME internal mode regardless of keyboard layout
-// 2. ImmGetConversionStatus via HIMC
-//    - Works for traditional Win32 apps
-// 3. GetKeyboardLayout (LEAST RELIABLE for Microsoft Pinyin)
-//    - Microsoft Pinyin uses same layout for CN and EN mode
-//    - Only useful as rough hint
-// 4. TSF GetActiveProfile (NOT per-thread, unreliable)
 
-ImeMode ImeSwitcher::getCurrentMode(HWND hwnd) {
-    if (!hwnd) return ImeMode::English;
+ImeMode ImeSwitcher::getCurrentMode(HWND hwnd, bool verbose, std::string* detail) {
+    if (!hwnd) {
+        if (detail) *detail = "no window → EN";
+        return ImeMode::English;
+    }
 
     DWORD threadId = getWindowThreadId(hwnd);
 
-    std::cout << "  [Detect] ---- Begin ----" << std::endl;
-
     // Step 1: WM_IME_CONTROL via default IME window (MOST RELIABLE)
-    // This works even for TSF-based modern apps and correctly reads
-    // the IME's internal CN/EN mode regardless of keyboard layout.
     HWND imeWnd = getDefaultImeWnd(hwnd);
     if (imeWnd) {
-        std::cout << "  [Detect] IME window found: 0x" << std::hex
-                  << reinterpret_cast<UINT_PTR>(imeWnd) << std::dec << std::endl;
+        if (verbose) {
+            std::cout << logIndent_ << "├─ [Detect] IME wnd: " << hwndStr(imeWnd)
+                      << " | TID:" << threadId << std::endl;
+        }
 
         LRESULT convResult = imeControlGetConvMode(imeWnd, 3, 30);
         if (convResult >= 0) {
-            // Valid result (0 = English mode, >0 = check NATIVE bit)
             DWORD convMode = static_cast<DWORD>(convResult);
             bool isNative = (convMode & IME_CMODE_NATIVE) != 0;
-            std::cout << "  [Detect] IME-Control: NATIVE=" << isNative
-                      << " convMode=0x" << std::hex << convMode << std::dec
-                      << " -> " << (isNative ? "CN" : "EN") << std::endl;
+            if (detail) {
+                *detail = "NATIVE=" + std::to_string(isNative) +
+                          " convMode=" + hexStr(convMode) +
+                          " [" + convModeDesc(convMode) + "]" +
+                          " → " + (isNative ? "CN" : "EN");
+            }
+            if (verbose) {
+                std::cout << logIndent_ << "├─ [Detect] NATIVE=" << isNative
+                          << " convMode=" << hexStr(convMode)
+                          << " [" << convModeDesc(convMode) << "]"
+                          << " → " << (isNative ? "CN" : "EN") << std::endl;
+            }
             return isNative ? ImeMode::Chinese : ImeMode::English;
         }
         // convResult == -1 means query failed, fall through
     } else {
-        std::cout << "  [Detect] No default IME window" << std::endl;
+        if (verbose) {
+            std::cout << logIndent_ << "├─ [Detect] No default IME window | TID:" << threadId << std::endl;
+        }
     }
 
     // Step 2: Try ImmGetConversionStatus via HIMC (works for Win32 apps)
@@ -193,32 +212,50 @@ ImeMode ImeSwitcher::getCurrentMode(HWND hwnd) {
         ImmReleaseContext(ctxHwnd, himc);
 
         bool isNative = (convMode & IME_CMODE_NATIVE) != 0;
-        std::cout << "  [Detect] IMM: NATIVE=" << isNative
-                  << " convMode=0x" << std::hex << convMode << std::dec
-                  << " -> " << (isNative ? "CN" : "EN") << std::endl;
+        if (detail) {
+            *detail = "IMM NATIVE=" + std::to_string(isNative) +
+                      " convMode=" + hexStr(convMode) +
+                      " [" + convModeDesc(convMode) + "]" +
+                      " sentMode=" + hexStr(sentMode) +
+                      " → " + (isNative ? "CN" : "EN");
+        }
+        if (verbose) {
+            std::cout << logIndent_ << "├─ [Detect] IMM via " << hwndStr(ctxHwnd)
+                      << ": NATIVE=" << isNative
+                      << " convMode=" << hexStr(convMode)
+                      << " [" << convModeDesc(convMode) << "]"
+                      << " sentMode=" << hexStr(sentMode)
+                      << " → " << (isNative ? "CN" : "EN") << std::endl;
+        }
         return isNative ? ImeMode::Chinese : ImeMode::English;
     }
 
     // Step 3: GetKeyboardLayout (UNRELIABLE for Microsoft Pinyin!)
-    // Microsoft Pinyin uses a single layout for both CN and EN mode.
-    // An English layout does NOT mean the IME is in English mode.
     HKL hkl = GetKeyboardLayout(threadId);
     LANGID langId = LOWORD(reinterpret_cast<UINT_PTR>(hkl));
 
-    std::cout << "  [Detect] Layout HKL=0x" << std::hex << reinterpret_cast<UINT_PTR>(hkl)
-              << " Lang=0x" << langId << std::dec << std::endl;
+    if (verbose) {
+        std::cout << logIndent_ << "├─ [Detect] Layout HKL=0x" << std::hex << reinterpret_cast<UINT_PTR>(hkl)
+                  << " Lang=0x" << langId << std::dec << std::endl;
+    }
 
     if (PRIMARYLANGID(langId) == LANG_CHINESE) {
-        // Chinese layout - IME is active, likely CN mode
-        std::cout << "  [Detect] -> CN (Chinese layout, likely CN)" << std::endl;
+        if (detail) {
+            *detail = "Layout=Chinese → CN (unreliable)";
+        }
+        if (verbose) {
+            std::cout << logIndent_ << "├─ [Detect] → CN (Chinese layout)" << std::endl;
+        }
         return ImeMode::Chinese;
     }
 
-    // English layout - we CANNOT determine the IME mode from layout alone.
-    // Microsoft Pinyin can be in CN mode with English layout.
-    // Without IME-Control or HIMC, we have to guess.
-    // Default to the configured default mode as a hint.
-    std::cout << "  [Detect] -> EN (English layout, unreliable for Pinyin)" << std::endl;
+    // English layout - unreliable for Pinyin
+    if (detail) {
+        *detail = "Layout=English → EN (unreliable)";
+    }
+    if (verbose) {
+        std::cout << logIndent_ << "├─ [Detect] → EN (English layout, unreliable)" << std::endl;
+    }
     return ImeMode::English;
 }
 
@@ -231,7 +268,7 @@ ImeMode ImeSwitcher::getCurrentModeViaTsf() {
         reinterpret_cast<void**>(&pMgr));
 
     if (FAILED(hr) || !pMgr) {
-        std::cout << "  [TSF] CreateInstance failed: 0x" << std::hex << hr << std::dec << std::endl;
+        std::cout << logIndent_ << "├─ [TSF] CreateInstance failed: 0x" << std::hex << hr << std::dec << std::endl;
         return ImeMode::Chinese;
     }
 
@@ -240,44 +277,40 @@ ImeMode ImeSwitcher::getCurrentModeViaTsf() {
     pMgr->Release();
 
     if (FAILED(hr)) {
-        std::cout << "  [TSF] GetActiveProfile failed: 0x" << std::hex << hr << std::dec << std::endl;
+        std::cout << logIndent_ << "├─ [TSF] GetActiveProfile failed: 0x" << std::hex << hr << std::dec << std::endl;
         return ImeMode::Chinese;
     }
 
-    std::cout << "  [TSF] Type=" << profile.dwProfileType
+    std::cout << logIndent_ << "├─ [TSF] Type=" << profile.dwProfileType
               << " HKL=0x" << std::hex << reinterpret_cast<UINT_PTR>(profile.hkl)
               << " Lang=0x" << profile.langid << std::dec << std::endl;
 
     if (profile.dwProfileType == TF_PROFILETYPE_INPUTPROCESSOR) {
-        std::cout << "  [TSF] -> CN (input processor)" << std::endl;
+        std::cout << logIndent_ << "├─ [TSF] → CN (input processor)" << std::endl;
         return ImeMode::Chinese;
     }
 
     if (profile.dwProfileType == TF_PROFILETYPE_KEYBOARDLAYOUT) {
-        std::cout << "  [TSF] -> EN (keyboard layout)" << std::endl;
+        std::cout << logIndent_ << "├─ [TSF] → EN (keyboard layout)" << std::endl;
         return ImeMode::English;
     }
 
-    std::cout << "  [TSF] -> CN (unknown profile type)" << std::endl;
+    std::cout << logIndent_ << "├─ [TSF] → CN (unknown profile type)" << std::endl;
     return ImeMode::Chinese;
 }
 
 //  Switch Verification 
+//
+// Prints Detect line using logIndent_, but does NOT print Verify line.
+// The caller (switchTo) prints Verify with └─ (success) or ├─ (failure).
 
 bool ImeSwitcher::verifySwitch(HWND hwnd, ImeMode expectedMode) {
     Sleep(100);  // Longer delay to let IME state settle
 
-    ImeMode actualMode = getCurrentMode(hwnd);
-    if (actualMode == expectedMode) {
-        std::cout << "  [Verify] OK - mode is "
-                  << (expectedMode == ImeMode::Chinese ? "CN" : "EN") << std::endl;
-        return true;
-    }
-
-    std::cout << "  [Verify] FAILED - expected "
-              << (expectedMode == ImeMode::Chinese ? "CN" : "EN")
-              << " but got " << (actualMode == ImeMode::Chinese ? "CN" : "EN") << std::endl;
-    return false;
+    std::string detail;
+    ImeMode actualMode = getCurrentMode(hwnd, false, &detail);
+    std::cout << logIndent_ << "├─ Detect: " << detail << std::endl;
+    return actualMode == expectedMode;
 }
 
 //  Switching Methods 
@@ -287,27 +320,31 @@ bool ImeSwitcher::switchViaImeControl(HWND hwnd, ImeMode targetMode) {
 
     HWND imeWnd = getDefaultImeWnd(hwnd);
     if (!imeWnd) {
-        std::cout << "  [IME-Control] No default IME window" << std::endl;
+        std::cout << logIndent_ << "├─ [IME-Control] No default IME window for " << hwndStr(hwnd) << std::endl;
         return false;
     }
 
     bool wantNative = (targetMode == ImeMode::Chinese);
+    DWORD tid = getWindowThreadId(hwnd);
+
+    std::cout << logIndent_ << "├─ [IME-Control] imeWnd: " << hwndStr(imeWnd)
+              << " | target: " << hwndStr(hwnd) << " TID:" << tid << std::endl;
 
     // Try to read current conversion mode (with retry)
     LRESULT convResult = imeControlGetConvMode(imeWnd, 3, 20);
     DWORD convMode = 0;
 
     if (convResult >= 0) {
-        // Successfully read current mode
         convMode = static_cast<DWORD>(convResult);
         bool isNative = (convMode & IME_CMODE_NATIVE) != 0;
 
-        std::cout << "  [IME-Control] Current NATIVE=" << isNative
+        std::cout << logIndent_ << "├─ [IME-Control] NATIVE=" << isNative
                   << " want=" << wantNative
-                  << " convMode=0x" << std::hex << convMode << std::dec << std::endl;
+                  << " convMode=" << hexStr(convMode)
+                  << " [" << convModeDesc(convMode) << "]" << std::endl;
 
         if (isNative == wantNative) {
-            std::cout << "  [IME-Control] Already in target mode" << std::endl;
+            std::cout << logIndent_ << "├─ [IME-Control] Already in target mode" << std::endl;
             return true;
         }
 
@@ -318,24 +355,17 @@ bool ImeSwitcher::switchViaImeControl(HWND hwnd, ImeMode targetMode) {
             convMode &= ~IME_CMODE_NATIVE;
         }
     } else {
-        // Could not read current mode - set a reasonable default
-        // For CN: NATIVE bit set; For EN: just alphanumeric (0)
         convMode = wantNative ? IME_CMODE_NATIVE : 0;
-        std::cout << "  [IME-Control] Cannot read current mode, setting convMode=0x"
-                  << std::hex << convMode << std::dec << std::endl;
+        std::cout << logIndent_ << "├─ [IME-Control] Cannot read mode, convMode=" << hexStr(convMode) << std::endl;
     }
 
     // Set the new conversion mode
     LRESULT setResult = SendMessage(imeWnd, WM_IME_CONTROL,
                                     static_cast<WPARAM>(IMC_SETCONVERSIONMODE), convMode);
 
-    std::cout << "  [IME-Control] SETCONVERSIONMODE(0x" << std::hex << convMode << std::dec
-              << ") returned " << setResult << std::endl;
+    std::cout << logIndent_ << "├─ [IME-Control] SETCONVERSIONMODE(" << hexStr(convMode)
+              << ") → " << setResult << std::endl;
 
-    // The return value should be the previous conversion mode
-    // Non-zero usually means success (previous mode was non-zero)
-    // Zero could mean: previous mode was 0 (English) OR failure
-    // We'll verify later, so just return true to indicate we tried
     return true;
 }
 
@@ -346,7 +376,7 @@ bool ImeSwitcher::switchViaImm(HWND hwnd, ImeMode targetMode) {
     HWND ctxHwnd = nullptr;
     HIMC himc = acquireImmContext(hwnd, threadId, ctxHwnd);
     if (!himc) {
-        std::cout << "  [IMM Switch] No HIMC available" << std::endl;
+        std::cout << logIndent_ << "├─ [IMM] No HIMC for " << hwndStr(hwnd) << " TID:" << threadId << std::endl;
         return false;
     }
 
@@ -356,9 +386,12 @@ bool ImeSwitcher::switchViaImm(HWND hwnd, ImeMode targetMode) {
     bool isNative = (convMode & IME_CMODE_NATIVE) != 0;
     bool wantNative = (targetMode == ImeMode::Chinese);
 
-    std::cout << "  [IMM Switch] NATIVE=" << isNative
+    std::cout << logIndent_ << "├─ [IMM] ctxHwnd: " << hwndStr(ctxHwnd)
+              << " HIMC: 0x" << std::hex << reinterpret_cast<UINT_PTR>(himc) << std::dec
+              << " | NATIVE=" << isNative
               << " want=" << wantNative
-              << " convMode=0x" << std::hex << convMode << std::dec << std::endl;
+              << " convMode=" << hexStr(convMode)
+              << " [" << convModeDesc(convMode) << "]" << std::endl;
 
     if (isNative == wantNative) {
         ImmReleaseContext(ctxHwnd, himc);
@@ -374,7 +407,7 @@ bool ImeSwitcher::switchViaImm(HWND hwnd, ImeMode targetMode) {
     BOOL result = ImmSetConversionStatus(himc, convMode, sentMode);
     ImmReleaseContext(ctxHwnd, himc);
 
-    std::cout << "  [IMM Switch] ImmSetConversionStatus -> "
+    std::cout << logIndent_ << "├─ [IMM] ImmSetConversionStatus → "
               << (result ? "OK" : "FAILED") << std::endl;
 
     return (result == TRUE);
@@ -387,7 +420,7 @@ void ImeSwitcher::simulateCtrlSpace(HWND targetHwnd) {
     bool attached = false;
     if (targetThreadId != ourThreadId) {
         attached = AttachThreadInput(ourThreadId, targetThreadId, TRUE);
-        std::cout << "  [KeySim] AttachThreadInput -> "
+        std::cout << logIndent_ << "├─ [KeySim] AttachThreadInput → "
                   << (attached ? "OK" : "FAILED") << std::endl;
     }
 
@@ -414,7 +447,7 @@ void ImeSwitcher::simulateCtrlSpace(HWND targetHwnd) {
     inputs[3].ki.dwFlags = KEYEVENTF_KEYUP;
 
     UINT sent = SendInput(4, inputs, sizeof(INPUT));
-    std::cout << "  [KeySim] Ctrl+Space sent=" << sent << "/4" << std::endl;
+    std::cout << logIndent_ << "├─ [KeySim] Ctrl+Space sent=" << sent << "/4" << std::endl;
 
     Sleep(80);
 
@@ -430,7 +463,7 @@ void ImeSwitcher::simulateShiftKey(HWND targetHwnd) {
     bool attached = false;
     if (targetThreadId != ourThreadId) {
         attached = AttachThreadInput(ourThreadId, targetThreadId, TRUE);
-        std::cout << "  [KeySim] AttachThreadInput -> "
+        std::cout << logIndent_ << "├─ [KeySim] AttachThreadInput → "
                   << (attached ? "OK" : "FAILED") << std::endl;
     }
 
@@ -446,7 +479,7 @@ void ImeSwitcher::simulateShiftKey(HWND targetHwnd) {
     inputs[1].ki.dwFlags = KEYEVENTF_KEYUP;
 
     UINT sent = SendInput(2, inputs, sizeof(INPUT));
-    std::cout << "  [KeySim] Shift sent=" << sent << "/2" << std::endl;
+    std::cout << logIndent_ << "├─ [KeySim] Shift sent=" << sent << "/2" << std::endl;
 
     Sleep(80);
 
@@ -456,67 +489,64 @@ void ImeSwitcher::simulateShiftKey(HWND targetHwnd) {
 }
 
 //  Switching Logic 
-//
-// Strategy: Stay on the current keyboard layout and toggle the IME's
-// internal CN/EN mode via the conversion mode (IME_CMODE_NATIVE bit).
-//
-// Order of methods:
-// 1. WM_IME_CONTROL via default IME window - works for TSF apps (Chrome, VS Code, Terminal)
-// 2. IMM ImmSetConversionStatus - works for Win32 apps with HIMC
-// 3. AttachThreadInput + SendInput (Ctrl+Space/Shift) - keyboard simulation
-// 4. Raw SendInput (no attach) - last resort
 
-void ImeSwitcher::switchTo(ImeMode targetMode, HWND hwnd, ImeMode currentMode,
+bool ImeSwitcher::switchTo(ImeMode targetMode, HWND hwnd, ImeMode currentMode,
                            SwitchMethod method) {
-    if (!hwnd) return;
+    if (!hwnd) return false;
 
     // Debounce: avoid switching too rapidly
     auto now = std::chrono::steady_clock::now();
     auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - lastSwitchTime_).count();
     if (elapsed < DEBOUNCE_MS && lastTargetMode_ == targetMode) {
-        return;
+        std::cout << logIndent_ << "└─ Debounced" << std::endl;
+        return true;
     }
 
     // Delay to let focus and IME window settle
     Sleep(50);
 
-    // FIX 3: Use the passed-in hwnd directly instead of calling GetForegroundWindow().
-    // This eliminates a race condition where GetForegroundWindow() may return a
-    // different window than the one we intended to switch after the 50ms delay.
-    // Also use the pre-detected currentMode instead of re-querying.
-
     if (currentMode == targetMode) {
-        std::cout << "  [Switch] Already in target mode, skip" << std::endl;
-        return;
+        std::cout << logIndent_ << "└─ Already in target mode" << std::endl;
+        return true;
     }
 
-    std::cout << "  [Switch] " << (currentMode == ImeMode::Chinese ? "CN" : "EN")
-              << " -> " << (targetMode == ImeMode::Chinese ? "CN" : "EN") << std::endl;
+    // Set indent for sub-tree output
+    std::string savedIndent = logIndent_;
+    logIndent_ = " │  ";
+
+    std::string methodStr = (method == SwitchMethod::Shift) ? "Shift" :
+                            (method == SwitchMethod::CtrlSpace) ? "Ctrl+Space" : "TSF";
+    std::cout << logIndent_ << "Target: " << hwndStr(hwnd)
+              << " | Method: " << methodStr << std::endl;
 
     // Step 1: Try WM_IME_CONTROL (most universal, works for TSF apps)
-    std::cout << "  [Switch] Trying IME-Control" << std::endl;
+    std::cout << logIndent_ << "Step 1: IME-Control" << std::endl;
     if (switchViaImeControl(hwnd, targetMode)) {
         if (verifySwitch(hwnd, targetMode)) {
+            std::cout << logIndent_ << "└─ Verify: OK" << std::endl;
+            logIndent_ = savedIndent;
             lastSwitchTime_ = std::chrono::steady_clock::now();
             lastTargetMode_ = targetMode;
-            return;
+            return true;
         }
-        std::cout << "  [Switch] IME-Control set but verification failed" << std::endl;
+        std::cout << logIndent_ << "├─ Verify: FAILED" << std::endl;
     }
 
     // Step 2: Try IMM API (works for Win32 apps with HIMC)
-    std::cout << "  [Switch] Trying IMM" << std::endl;
+    std::cout << logIndent_ << "Step 2: IMM API" << std::endl;
     if (switchViaImm(hwnd, targetMode)) {
         if (verifySwitch(hwnd, targetMode)) {
+            std::cout << logIndent_ << "└─ Verify: OK" << std::endl;
+            logIndent_ = savedIndent;
             lastSwitchTime_ = std::chrono::steady_clock::now();
             lastTargetMode_ = targetMode;
-            return;
+            return true;
         }
-        std::cout << "  [Switch] IMM succeeded but verification failed" << std::endl;
+        std::cout << logIndent_ << "├─ Verify: FAILED" << std::endl;
     }
 
     // Step 3: Keyboard simulation with AttachThreadInput
-    std::cout << "  [Switch] Trying keyboard simulation with AttachThreadInput" << std::endl;
+    std::cout << logIndent_ << "Step 3: KeySim (AttachThreadInput)" << std::endl;
     switch (method) {
         case SwitchMethod::Shift:
             simulateShiftKey(hwnd);
@@ -530,13 +560,16 @@ void ImeSwitcher::switchTo(ImeMode targetMode, HWND hwnd, ImeMode currentMode,
     }
 
     if (verifySwitch(hwnd, targetMode)) {
+        std::cout << logIndent_ << "└─ Verify: OK" << std::endl;
+        logIndent_ = savedIndent;
         lastSwitchTime_ = std::chrono::steady_clock::now();
         lastTargetMode_ = targetMode;
-        return;
+        return true;
     }
+    std::cout << logIndent_ << "├─ Verify: FAILED" << std::endl;
 
     // Step 4: Last resort - keyboard simulation WITHOUT AttachThreadInput
-    std::cout << "  [Switch] Trying keyboard simulation without attach" << std::endl;
+    std::cout << logIndent_ << "Step 4: KeySim (raw)" << std::endl;
     switch (method) {
         case SwitchMethod::Shift:
             simulateShiftKeyRaw();
@@ -549,10 +582,17 @@ void ImeSwitcher::switchTo(ImeMode targetMode, HWND hwnd, ImeMode currentMode,
             break;
     }
 
-    verifySwitch(hwnd, targetMode);
+    bool ok = verifySwitch(hwnd, targetMode);
+    if (ok) {
+        std::cout << logIndent_ << "└─ Verify: OK" << std::endl;
+    } else {
+        std::cout << logIndent_ << "└─ Verify: FAILED" << std::endl;
+    }
 
+    logIndent_ = savedIndent;
     lastSwitchTime_ = std::chrono::steady_clock::now();
     lastTargetMode_ = targetMode;
+    return ok;
 }
 
 //  Raw keyboard simulation (no AttachThreadInput) 
@@ -570,7 +610,7 @@ void ImeSwitcher::simulateCtrlSpaceRaw() {
     inputs[3].ki.wVk = VK_CONTROL;
     inputs[3].ki.dwFlags = KEYEVENTF_KEYUP;
     UINT sent = SendInput(4, inputs, sizeof(INPUT));
-    std::cout << "  [KeySim-Raw] Ctrl+Space sent=" << sent << "/4" << std::endl;
+    std::cout << logIndent_ << "├─ [KeySim] Ctrl+Space sent=" << sent << "/4" << std::endl;
 }
 
 void ImeSwitcher::simulateShiftKeyRaw() {
@@ -581,5 +621,5 @@ void ImeSwitcher::simulateShiftKeyRaw() {
     inputs[1].ki.wVk = VK_SHIFT;
     inputs[1].ki.dwFlags = KEYEVENTF_KEYUP;
     UINT sent = SendInput(2, inputs, sizeof(INPUT));
-    std::cout << "  [KeySim-Raw] Shift sent=" << sent << "/2" << std::endl;
+    std::cout << logIndent_ << "├─ [KeySim] Shift sent=" << sent << "/2" << std::endl;
 }
