@@ -137,13 +137,17 @@ int main() {
             rootHwnd = GetForegroundWindow();
         }
 
-        // FIX 2: Strengthen same-app detection with both rootHwnd AND processName.
-        // Previously only rootHwnd was used, which could cause false matches when
-        // an artifact event (with same rootHwnd but empty processName) leaked through
-        // and updated lastState before the real event arrived.
-        bool sameApp = (rootHwnd != nullptr && !info.processName.empty()
-                        && rootHwnd == lastState.rootHwnd
-                        && info.processName == lastState.processName);
+        // Same-app detection: compare rootHwnd only.
+        // Must NOT compare processName because multi-process apps (VS Code, Chrome,
+        // Windows Terminal) have child processes with different names sharing the same
+        // top-level window. Using processName would cause same-window events from
+        // different child processes to be treated as "different app", triggering
+        // unwanted IME switches that override the user's manual IME choice.
+        //
+        // Safety: PID=0 / empty-processName artifact events (which previously poisoned
+        // lastState.rootHwnd) are now filtered by the check above (FIX 1), so a
+        // rootHwnd-only comparison is safe.
+        bool sameApp = (rootHwnd != nullptr && rootHwnd == lastState.rootHwnd);
 
         // ---- Same top-level window: DO NOT touch IME ----
         // User may have manually switched IME, or IME state may be in flux
