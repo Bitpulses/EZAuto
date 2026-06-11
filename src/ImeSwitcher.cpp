@@ -37,7 +37,7 @@ HWND ImeSwitcher::getFocusWindowForThread(DWORD threadId) {
     return nullptr;
 }
 
-// ===================== Robust HIMC Acquisition =====================
+//  Robust HIMC Acquisition 
 
 HIMC ImeSwitcher::acquireImmContext(HWND hwnd, DWORD threadId, HWND& outCtxHwnd) {
     HIMC himc = nullptr;
@@ -78,7 +78,7 @@ HIMC ImeSwitcher::acquireImmContext(HWND hwnd, DWORD threadId, HWND& outCtxHwnd)
     return nullptr;
 }
 
-// ===================== IME-Control Helpers =====================
+//  IME-Control Helpers 
 //
 // WM_IME_CONTROL via the default IME window is the MOST RELIABLE way
 // to detect and switch IME mode for modern TSF-based apps (Chrome,
@@ -141,7 +141,7 @@ LRESULT ImeSwitcher::imeControlGetConvMode(HWND imeWnd, int maxRetries, int retr
     return -1;  // Use -1 as sentinel for "query failed"
 }
 
-// ===================== Mode Detection =====================
+//  Mode Detection 
 //
 // Detection priority (CHANGED from previous version):
 // 1. WM_IME_CONTROL / IMC_GETCONVERSIONMODE via default IME window
@@ -262,7 +262,7 @@ ImeMode ImeSwitcher::getCurrentModeViaTsf() {
     return ImeMode::Chinese;
 }
 
-// ===================== Switch Verification =====================
+//  Switch Verification 
 
 bool ImeSwitcher::verifySwitch(HWND hwnd, ImeMode expectedMode) {
     Sleep(100);  // Longer delay to let IME state settle
@@ -280,7 +280,7 @@ bool ImeSwitcher::verifySwitch(HWND hwnd, ImeMode expectedMode) {
     return false;
 }
 
-// ===================== Switching Methods =====================
+//  Switching Methods 
 
 bool ImeSwitcher::switchViaImeControl(HWND hwnd, ImeMode targetMode) {
     if (!hwnd) return false;
@@ -455,7 +455,7 @@ void ImeSwitcher::simulateShiftKey(HWND targetHwnd) {
     }
 }
 
-// ===================== Switching Logic =====================
+//  Switching Logic 
 //
 // Strategy: Stay on the current keyboard layout and toggle the IME's
 // internal CN/EN mode via the conversion mode (IME_CMODE_NATIVE bit).
@@ -555,7 +555,7 @@ void ImeSwitcher::switchTo(ImeMode targetMode, HWND hwnd, ImeMode currentMode,
     lastTargetMode_ = targetMode;
 }
 
-// ===================== Raw keyboard simulation (no AttachThreadInput) =====================
+//  Raw keyboard simulation (no AttachThreadInput) 
 
 void ImeSwitcher::simulateCtrlSpaceRaw() {
     INPUT inputs[4] = {};
