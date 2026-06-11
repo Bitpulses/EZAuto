@@ -14,7 +14,9 @@
         "ssh.exe": "english",
         "git.exe": "english",
         "mobaxterm.exe":"english",
-
+        "zed.exe": "english",
+        "conhost.exe": "english",
+        
         "code.exe": "english",
         "devenv.exe": "english",
         "idea64.exe": "english",
@@ -31,6 +33,8 @@
         "explorer.exe": "english",
         "githubdesktop.exe": "english",
 
-        "excel.exe": "english"
+        "excel.exe": "english",
+
+        "chrome.exe": "english"
     }
 }
