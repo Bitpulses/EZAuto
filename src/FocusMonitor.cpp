@@ -7,7 +7,7 @@
 
 #pragma comment(lib, "psapi.lib")
 
-// ======================== RuntimeId Helpers ========================
+//  RuntimeId Helpers 
 
 std::vector<int> FocusMonitor::FocusChangedHandler::getRuntimeId(IUIAutomationElement* pElement) {
     std::vector<int> result;
@@ -38,7 +38,7 @@ bool FocusMonitor::FocusChangedHandler::compareRuntimeId(const std::vector<int>&
     return true;
 }
 
-// ======================== FocusChangedHandler ========================
+//  FocusChangedHandler 
 
 HRESULT STDMETHODCALLTYPE FocusMonitor::FocusChangedHandler::HandleFocusChangedEvent(
     IUIAutomationElement* pSender)
@@ -96,16 +96,59 @@ HRESULT STDMETHODCALLTYPE FocusMonitor::FocusChangedHandler::HandleFocusChangedE
         info.hwnd = GetForegroundWindow();
     }
 
-    // Determine if editable control
-    info.isEditable = (info.controlType == UIA_EditControlTypeId ||
-                       info.controlType == UIA_DocumentControlTypeId ||
-                       info.controlType == UIA_TextControlTypeId);
+    // Determine if editable control using UIA Patterns for accuracy.
+    // controlType alone is unreliable: Text controls include static labels,
+    // while custom-drawn edit boxes may report Pane/Custom type.
+    // We use Patterns for precise detection:
+    //   - Edit/Document controlType => almost always editable (fast path)
+    //   - ValuePattern available && !IsReadOnly => standard input field
+    //   - TextPattern available => rich text editor (Word, VS Code, etc.)
+    info.isEditable = false;
+
+    if (info.controlType == UIA_EditControlTypeId ||
+        info.controlType == UIA_DocumentControlTypeId) {
+        info.isEditable = true;
+    }
+
+    if (!info.isEditable) {
+        // Check ValuePattern (covers input fields regardless of controlType)
+        VARIANT varAvailable;
+        VariantInit(&varAvailable);
+        if (SUCCEEDED(pSender->GetCurrentPropertyValue(
+                UIA_IsValuePatternAvailablePropertyId, &varAvailable)) &&
+            varAvailable.vt == VT_BOOL && varAvailable.boolVal == VARIANT_TRUE) {
+            // ValuePattern exists - check if read-only
+            VARIANT varReadOnly;
+            VariantInit(&varReadOnly);
+            if (SUCCEEDED(pSender->GetCurrentPropertyValue(
+                    UIA_ValueIsReadOnlyPropertyId, &varReadOnly)) &&
+                varReadOnly.vt == VT_BOOL && varReadOnly.boolVal == VARIANT_TRUE) {
+                // Read-only, not editable
+            } else {
+                info.isEditable = true;
+            }
+            VariantClear(&varReadOnly);
+        }
+        VariantClear(&varAvailable);
+    }
+
+    if (!info.isEditable) {
+        // Check TextPattern (covers rich text editors)
+        VARIANT varAvailable;
+        VariantInit(&varAvailable);
+        if (SUCCEEDED(pSender->GetCurrentPropertyValue(
+                UIA_IsTextPatternAvailablePropertyId, &varAvailable)) &&
+            varAvailable.vt == VT_BOOL && varAvailable.boolVal == VARIANT_TRUE) {
+            info.isEditable = true;
+        }
+        VariantClear(&varAvailable);
+    }
 
     callback_(info);
     return S_OK;
 }
 
-// ======================== FocusMonitor ========================
+// FocusMonitor 
 
 FocusMonitor::FocusMonitor() = default;
 
