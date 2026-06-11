@@ -111,7 +111,7 @@ ImeMode ConfigManager::getTargetMode(const std::string& processName, bool isPass
     return defaultMode_;
 }
 
-// ===================== Minimal JSON Parser =====================
+//  Minimal JSON Parser 
 
 void ConfigManager::skipWhitespace(const std::string& s, size_t& pos) {
     while (pos < s.size() && (s[pos] == ' ' || s[pos] == '\t' || s[pos] == '\n' || s[pos] == '\r')) {
