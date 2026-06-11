@@ -466,7 +466,8 @@ void ImeSwitcher::simulateShiftKey(HWND targetHwnd) {
 // 3. AttachThreadInput + SendInput (Ctrl+Space/Shift) - keyboard simulation
 // 4. Raw SendInput (no attach) - last resort
 
-void ImeSwitcher::switchTo(ImeMode targetMode, HWND hwnd, SwitchMethod method) {
+void ImeSwitcher::switchTo(ImeMode targetMode, HWND hwnd, ImeMode currentMode,
+                           SwitchMethod method) {
     if (!hwnd) return;
 
     // Debounce: avoid switching too rapidly
@@ -479,11 +480,11 @@ void ImeSwitcher::switchTo(ImeMode targetMode, HWND hwnd, SwitchMethod method) {
     // Delay to let focus and IME window settle
     Sleep(50);
 
-    HWND foreground = GetForegroundWindow();
-    if (!foreground) return;
+    // FIX 3: Use the passed-in hwnd directly instead of calling GetForegroundWindow().
+    // This eliminates a race condition where GetForegroundWindow() may return a
+    // different window than the one we intended to switch after the 50ms delay.
+    // Also use the pre-detected currentMode instead of re-querying.
 
-    // Check current mode
-    ImeMode currentMode = getCurrentMode(foreground);
     if (currentMode == targetMode) {
         std::cout << "  [Switch] Already in target mode, skip" << std::endl;
         return;
@@ -494,8 +495,8 @@ void ImeSwitcher::switchTo(ImeMode targetMode, HWND hwnd, SwitchMethod method) {
 
     // Step 1: Try WM_IME_CONTROL (most universal, works for TSF apps)
     std::cout << "  [Switch] Trying IME-Control" << std::endl;
-    if (switchViaImeControl(foreground, targetMode)) {
-        if (verifySwitch(foreground, targetMode)) {
+    if (switchViaImeControl(hwnd, targetMode)) {
+        if (verifySwitch(hwnd, targetMode)) {
             lastSwitchTime_ = std::chrono::steady_clock::now();
             lastTargetMode_ = targetMode;
             return;
@@ -505,8 +506,8 @@ void ImeSwitcher::switchTo(ImeMode targetMode, HWND hwnd, SwitchMethod method) {
 
     // Step 2: Try IMM API (works for Win32 apps with HIMC)
     std::cout << "  [Switch] Trying IMM" << std::endl;
-    if (switchViaImm(foreground, targetMode)) {
-        if (verifySwitch(foreground, targetMode)) {
+    if (switchViaImm(hwnd, targetMode)) {
+        if (verifySwitch(hwnd, targetMode)) {
             lastSwitchTime_ = std::chrono::steady_clock::now();
             lastTargetMode_ = targetMode;
             return;
@@ -518,17 +519,17 @@ void ImeSwitcher::switchTo(ImeMode targetMode, HWND hwnd, SwitchMethod method) {
     std::cout << "  [Switch] Trying keyboard simulation with AttachThreadInput" << std::endl;
     switch (method) {
         case SwitchMethod::Shift:
-            simulateShiftKey(foreground);
+            simulateShiftKey(hwnd);
             break;
         case SwitchMethod::CtrlSpace:
-            simulateCtrlSpace(foreground);
+            simulateCtrlSpace(hwnd);
             break;
         case SwitchMethod::TSF:
-            simulateShiftKey(foreground);
+            simulateShiftKey(hwnd);
             break;
     }
 
-    if (verifySwitch(foreground, targetMode)) {
+    if (verifySwitch(hwnd, targetMode)) {
         lastSwitchTime_ = std::chrono::steady_clock::now();
         lastTargetMode_ = targetMode;
         return;
@@ -548,7 +549,7 @@ void ImeSwitcher::switchTo(ImeMode targetMode, HWND hwnd, SwitchMethod method) {
             break;
     }
 
-    verifySwitch(foreground, targetMode);
+    verifySwitch(hwnd, targetMode);
 
     lastSwitchTime_ = std::chrono::steady_clock::now();
     lastTargetMode_ = targetMode;
