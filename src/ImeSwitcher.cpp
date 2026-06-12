@@ -305,7 +305,7 @@ ImeMode ImeSwitcher::getCurrentModeViaTsf() {
 // The caller (switchTo) prints Verify with └─ (success) or ├─ (failure).
 
 bool ImeSwitcher::verifySwitch(HWND hwnd, ImeMode expectedMode) {
-    Sleep(100);  // Longer delay to let IME state settle
+    Sleep(30);  // Let IME process the key simulation
 
     std::string detail;
     ImeMode actualMode = getCurrentMode(hwnd, false, &detail);
@@ -314,104 +314,6 @@ bool ImeSwitcher::verifySwitch(HWND hwnd, ImeMode expectedMode) {
 }
 
 //  Switching Methods 
-
-bool ImeSwitcher::switchViaImeControl(HWND hwnd, ImeMode targetMode) {
-    if (!hwnd) return false;
-
-    HWND imeWnd = getDefaultImeWnd(hwnd);
-    if (!imeWnd) {
-        std::cout << logIndent_ << "├─ [IME-Control] No default IME window for " << hwndStr(hwnd) << std::endl;
-        return false;
-    }
-
-    bool wantNative = (targetMode == ImeMode::Chinese);
-    DWORD tid = getWindowThreadId(hwnd);
-
-    std::cout << logIndent_ << "├─ [IME-Control] imeWnd: " << hwndStr(imeWnd)
-              << " | target: " << hwndStr(hwnd) << " TID:" << tid << std::endl;
-
-    // Try to read current conversion mode (with retry)
-    LRESULT convResult = imeControlGetConvMode(imeWnd, 3, 20);
-    DWORD convMode = 0;
-
-    if (convResult >= 0) {
-        convMode = static_cast<DWORD>(convResult);
-        bool isNative = (convMode & IME_CMODE_NATIVE) != 0;
-
-        std::cout << logIndent_ << "├─ [IME-Control] NATIVE=" << isNative
-                  << " want=" << wantNative
-                  << " convMode=" << hexStr(convMode)
-                  << " [" << convModeDesc(convMode) << "]" << std::endl;
-
-        if (isNative == wantNative) {
-            std::cout << logIndent_ << "├─ [IME-Control] Already in target mode" << std::endl;
-            return true;
-        }
-
-        // Modify NATIVE bit while preserving other flags
-        if (wantNative) {
-            convMode |= IME_CMODE_NATIVE;
-        } else {
-            convMode &= ~IME_CMODE_NATIVE;
-        }
-    } else {
-        convMode = wantNative ? IME_CMODE_NATIVE : 0;
-        std::cout << logIndent_ << "├─ [IME-Control] Cannot read mode, convMode=" << hexStr(convMode) << std::endl;
-    }
-
-    // Set the new conversion mode
-    LRESULT setResult = SendMessage(imeWnd, WM_IME_CONTROL,
-                                    static_cast<WPARAM>(IMC_SETCONVERSIONMODE), convMode);
-
-    std::cout << logIndent_ << "├─ [IME-Control] SETCONVERSIONMODE(" << hexStr(convMode)
-              << ") → " << setResult << std::endl;
-
-    return true;
-}
-
-bool ImeSwitcher::switchViaImm(HWND hwnd, ImeMode targetMode) {
-    if (!hwnd) return false;
-
-    DWORD threadId = getWindowThreadId(hwnd);
-    HWND ctxHwnd = nullptr;
-    HIMC himc = acquireImmContext(hwnd, threadId, ctxHwnd);
-    if (!himc) {
-        std::cout << logIndent_ << "├─ [IMM] No HIMC for " << hwndStr(hwnd) << " TID:" << threadId << std::endl;
-        return false;
-    }
-
-    DWORD convMode = 0, sentMode = 0;
-    ImmGetConversionStatus(himc, &convMode, &sentMode);
-
-    bool isNative = (convMode & IME_CMODE_NATIVE) != 0;
-    bool wantNative = (targetMode == ImeMode::Chinese);
-
-    std::cout << logIndent_ << "├─ [IMM] ctxHwnd: " << hwndStr(ctxHwnd)
-              << " HIMC: 0x" << std::hex << reinterpret_cast<UINT_PTR>(himc) << std::dec
-              << " | NATIVE=" << isNative
-              << " want=" << wantNative
-              << " convMode=" << hexStr(convMode)
-              << " [" << convModeDesc(convMode) << "]" << std::endl;
-
-    if (isNative == wantNative) {
-        ImmReleaseContext(ctxHwnd, himc);
-        return true;
-    }
-
-    if (wantNative) {
-        convMode |= IME_CMODE_NATIVE;
-    } else {
-        convMode &= ~IME_CMODE_NATIVE;
-    }
-
-    BOOL result = ImmSetConversionStatus(himc, convMode, sentMode);
-    ImmReleaseContext(ctxHwnd, himc);
-
-    std::cout << logIndent_ << "├─ [IMM] ImmSetConversionStatus → "
-              << (result ? "OK" : "FAILED") << std::endl;
-
-    return (result == TRUE);
-}
 
 void ImeSwitcher::simulateCtrlSpace(HWND targetHwnd) {
     DWORD targetThreadId = GetWindowThreadProcessId(targetHwnd, nullptr);
@@ -424,7 +326,7 @@ void ImeSwitcher::simulateCtrlSpace(HWND targetHwnd) {
                   << (attached ? "OK" : "FAILED") << std::endl;
     }
 
-    if (attached) Sleep(20);
+    if (attached) Sleep(5);
 
     INPUT inputs[4] = {};
 
@@ -449,8 +351,6 @@ void ImeSwitcher::simulateCtrlSpace(HWND targetHwnd) {
     UINT sent = SendInput(4, inputs, sizeof(INPUT));
     std::cout << logIndent_ << "├─ [KeySim] Ctrl+Space sent=" << sent << "/4" << std::endl;
 
-    Sleep(80);
-
     if (attached) {
         AttachThreadInput(ourThreadId, targetThreadId, FALSE);
     }
@@ -467,7 +367,7 @@ void ImeSwitcher::simulateShiftKey(HWND targetHwnd) {
                   << (attached ? "OK" : "FAILED") << std::endl;
     }
 
-    if (attached) Sleep(20);
+    if (attached) Sleep(5);
 
     INPUT inputs[2] = {};
     inputs[0].type = INPUT_KEYBOARD;
@@ -480,8 +380,6 @@ void ImeSwitcher::simulateShiftKey(HWND targetHwnd) {
 
     UINT sent = SendInput(2, inputs, sizeof(INPUT));
     std::cout << logIndent_ << "├─ [KeySim] Shift sent=" << sent << "/2" << std::endl;
-
-    Sleep(80);
 
     if (attached) {
         AttachThreadInput(ourThreadId, targetThreadId, FALSE);
@@ -502,9 +400,6 @@ bool ImeSwitcher::switchTo(ImeMode targetMode, HWND hwnd, ImeMode currentMode,
         return true;
     }
 
-    // Delay to let focus and IME window settle
-    Sleep(50);
-
     if (currentMode == targetMode) {
         std::cout << logIndent_ << "└─ Already in target mode" << std::endl;
         return true;
@@ -519,34 +414,8 @@ bool ImeSwitcher::switchTo(ImeMode targetMode, HWND hwnd, ImeMode currentMode,
     std::cout << logIndent_ << "Target: " << hwndStr(hwnd)
               << " | Method: " << methodStr << std::endl;
 
-    // Step 1: Try WM_IME_CONTROL (most universal, works for TSF apps)
-    std::cout << logIndent_ << "Step 1: IME-Control" << std::endl;
-    if (switchViaImeControl(hwnd, targetMode)) {
-        if (verifySwitch(hwnd, targetMode)) {
-            std::cout << logIndent_ << "└─ Verify: OK" << std::endl;
-            logIndent_ = savedIndent;
-            lastSwitchTime_ = std::chrono::steady_clock::now();
-            lastTargetMode_ = targetMode;
-            return true;
-        }
-        std::cout << logIndent_ << "├─ Verify: FAILED" << std::endl;
-    }
-
-    // Step 2: Try IMM API (works for Win32 apps with HIMC)
-    std::cout << logIndent_ << "Step 2: IMM API" << std::endl;
-    if (switchViaImm(hwnd, targetMode)) {
-        if (verifySwitch(hwnd, targetMode)) {
-            std::cout << logIndent_ << "└─ Verify: OK" << std::endl;
-            logIndent_ = savedIndent;
-            lastSwitchTime_ = std::chrono::steady_clock::now();
-            lastTargetMode_ = targetMode;
-            return true;
-        }
-        std::cout << logIndent_ << "├─ Verify: FAILED" << std::endl;
-    }
-
-    // Step 3: Keyboard simulation with AttachThreadInput
-    std::cout << logIndent_ << "Step 3: KeySim (AttachThreadInput)" << std::endl;
+    // Step 1: Keyboard simulation with AttachThreadInput
+    std::cout << logIndent_ << "Step 1: KeySim (AttachThreadInput)" << std::endl;
     switch (method) {
         case SwitchMethod::Shift:
             simulateShiftKey(hwnd);
@@ -568,8 +437,8 @@ bool ImeSwitcher::switchTo(ImeMode targetMode, HWND hwnd, ImeMode currentMode,
     }
     std::cout << logIndent_ << "├─ Verify: FAILED" << std::endl;
 
-    // Step 4: Last resort - keyboard simulation WITHOUT AttachThreadInput
-    std::cout << logIndent_ << "Step 4: KeySim (raw)" << std::endl;
+    // Step 2: Fallback - keyboard simulation WITHOUT AttachThreadInput
+    std::cout << logIndent_ << "Step 2: KeySim (raw)" << std::endl;
     switch (method) {
         case SwitchMethod::Shift:
             simulateShiftKeyRaw();
