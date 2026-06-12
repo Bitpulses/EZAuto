@@ -181,6 +181,18 @@ int main() {
             rootHwnd = GetForegroundWindow();
         }
 
+        // Filter popup menus and tooltips: they are separate top-level windows
+        // (#32768 class) that share the same process as their parent app.
+        // Without this filter, right-click menus (e.g. MobaXterm) trigger
+        // a false "app switch" and change IME state.
+        std::string rootClass = getWindowClass(rootHwnd);
+        if (rootClass == "#32768" || rootClass == "tooltips_class32") {
+            std::cout << "[" << getTimestamp() << "] Focus ── " << info.processName
+                      << " (PID:" << info.processId << ", " << ctrlType << ")"
+                      << " → popup filtered" << std::endl;
+            return;
+        }
+
         // Same-app detection: compare rootHwnd only.
         bool sameApp = (rootHwnd != nullptr && rootHwnd == lastState.rootHwnd);
 
