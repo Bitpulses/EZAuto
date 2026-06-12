@@ -32,17 +32,11 @@ private:
 
     // ---- Switching Methods ----
 
-    // Method 1: IMM API - toggle IME_CMODE_NATIVE bit (works for Win32 apps with HIMC)
-    bool switchViaImm(HWND hwnd, ImeMode targetMode);
-
-    // Method 2: WM_IME_CONTROL through default IME window (may work for TSF apps)
-    bool switchViaImeControl(HWND hwnd, ImeMode targetMode);
-
-    // Method 3: Keyboard simulation with AttachThreadInput
+    // Keyboard simulation with AttachThreadInput
     void simulateCtrlSpace(HWND targetHwnd);
     void simulateShiftKey(HWND targetHwnd);
 
-    // Method 4: Raw keyboard simulation (no AttachThreadInput, last resort)
+    // Raw keyboard simulation (no AttachThreadInput, fallback)
     void simulateCtrlSpaceRaw();
     void simulateShiftKeyRaw();
 
