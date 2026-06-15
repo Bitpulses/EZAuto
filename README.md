@@ -67,7 +67,7 @@ Create `ezauto.json` in the same folder:
 ```json
 {
     "default_mode": "chinese",
-    "switch_method": "ctrl_space",
+    "switch_method": "ctrl+space",
     "rules": {
         "cmd.exe": "english",
         "powershell.exe": "english",
