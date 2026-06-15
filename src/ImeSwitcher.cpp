@@ -351,6 +351,11 @@ void ImeSwitcher::simulateCtrlSpace(HWND targetHwnd) {
     UINT sent = SendInput(4, inputs, sizeof(INPUT));
     std::cout << logIndent_ << "├─ [KeySim] Ctrl+Space sent=" << sent << "/4" << std::endl;
 
+    // Wait for IME to process the key chord before detaching.
+    // Without this delay, DetachThreadInput may break the modifier state,
+    // causing the Space KeyUp to leak to the target app (e.g. browser scrolling).
+    Sleep(30);
+
     if (attached) {
         AttachThreadInput(ourThreadId, targetThreadId, FALSE);
     }
@@ -452,6 +457,33 @@ bool ImeSwitcher::switchTo(ImeMode targetMode, HWND hwnd, ImeMode currentMode,
     }
 
     bool ok = verifySwitch(hwnd, targetMode);
+    if (ok) {
+        std::cout << logIndent_ << "└─ Verify: OK" << std::endl;
+        logIndent_ = savedIndent;
+        lastSwitchTime_ = std::chrono::steady_clock::now();
+        lastTargetMode_ = targetMode;
+        return true;
+    }
+    std::cout << logIndent_ << "├─ Verify: FAILED" << std::endl;
+
+    // Step 3: Fallback with alternative method (e.g. Ctrl+Space failed → try Shift)
+    // Some apps like Word intercept Ctrl+Space, so Shift works as alternative
+    SwitchMethod fallback = (method == SwitchMethod::CtrlSpace) ? SwitchMethod::Shift : SwitchMethod::CtrlSpace;
+    std::string fallbackStr = (fallback == SwitchMethod::Shift) ? "Shift" : "Ctrl+Space";
+    std::cout << logIndent_ << "Step 3: KeySim " << fallbackStr << " (AttachThreadInput)" << std::endl;
+    switch (fallback) {
+        case SwitchMethod::Shift:
+            simulateShiftKey(hwnd);
+            break;
+        case SwitchMethod::CtrlSpace:
+            simulateCtrlSpace(hwnd);
+            break;
+        case SwitchMethod::TSF:
+            simulateShiftKey(hwnd);
+            break;
+    }
+
+    ok = verifySwitch(hwnd, targetMode);
     if (ok) {
         std::cout << logIndent_ << "└─ Verify: OK" << std::endl;
     } else {
