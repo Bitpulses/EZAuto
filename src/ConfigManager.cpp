@@ -241,7 +241,7 @@ SwitchMethod ConfigManager::stringToSwitchMethod(const std::string& methodStr) {
     std::string lower = methodStr;
     std::transform(lower.begin(), lower.end(), lower.begin(),
                    [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-    if (lower == "ctrl_space") return SwitchMethod::CtrlSpace;
+    if (lower == "ctrl+space" || lower == "ctrl_space") return SwitchMethod::CtrlSpace;
     if (lower == "tsf") return SwitchMethod::TSF;
     return SwitchMethod::Shift;
 }
