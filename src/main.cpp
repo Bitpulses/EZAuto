@@ -110,9 +110,9 @@ int main() {
 
     g_mainThreadId = GetCurrentThreadId();
 
-    std::cout << "========================================" << std::endl;
-    std::cout << "  EZAuto v0.1.4 - Auto IME Switcher" << std::endl;
-    std::cout << "========================================" << std::endl;
+    std::cout << "===================================================" << std::endl;
+    std::cout << "        EZAuto v0.1.5 - Auto IME Switcher" << std::endl;
+    std::cout << "===================================================" << std::endl;
 
     SetConsoleCtrlHandler(ConsoleHandler, TRUE);
 
@@ -204,7 +204,7 @@ int main() {
             return;
         }
 
-        // ---- Different top-level window: switch IME ----
+        // Different top-level window: switch IME
         ImeMode targetMode = config.getTargetMode(info.processName, info.isPassword);
         HWND targetHwnd = GetForegroundWindow();
         if (!targetHwnd) return;
@@ -269,7 +269,7 @@ int main() {
 
     std::cout << std::endl;
     std::cout << "EZAuto is running in background. Press Ctrl+C to exit." << std::endl;
-    std::cout << "----------------------------------------" << std::endl;
+    std::cout << "---------------------------------------------------" << std::endl;
 
     MSG msg;
     while (GetMessage(&msg, NULL, 0, 0) > 0) {
