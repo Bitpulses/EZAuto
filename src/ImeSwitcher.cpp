@@ -129,7 +129,7 @@ HWND ImeSwitcher::getDefaultImeWnd(HWND hwnd) {
     return nullptr;
 }
 
-LRESULT ImeSwitcher::imeControlGetConvMode(HWND imeWnd, int maxRetries, int retryDelayMs) {
+LRESULT ImeSwitcher::imeControlGetConvMode(HWND imeWnd, int maxRetries, int retryDelayMs, bool verbose) {
     if (!imeWnd) return 0;
 
     for (int i = 0; i < maxRetries; ++i) {
@@ -151,12 +151,16 @@ LRESULT ImeSwitcher::imeControlGetConvMode(HWND imeWnd, int maxRetries, int retr
                                      static_cast<WPARAM>(IMC_GETOPENSTATUS), 0);
     if (openStatus) {
         // IME is open but conversion mode is 0 => genuine English/alpha mode
-        std::cout << logIndent_ << "├─ [IME-Control] " << hwndStr(imeWnd) << " convMode=0, IME open → EN" << std::endl;
+        if (verbose) {
+            std::cout << logIndent_ << "├─ [IME-Control] " << hwndStr(imeWnd) << " convMode=0, IME open → EN" << std::endl;
+        }
         return 0;  // 0 is valid: English mode
     }
 
     // IME appears closed or query completely failed
-    std::cout << logIndent_ << "├─ [IME-Control] " << hwndStr(imeWnd) << " both queries returned 0 (failed)" << std::endl;
+    if (verbose) {
+        std::cout << logIndent_ << "├─ [IME-Control] " << hwndStr(imeWnd) << " both queries returned 0 (failed)" << std::endl;
+    }
     return -1;  // Use -1 as sentinel for "query failed"
 }
 
@@ -178,7 +182,7 @@ ImeMode ImeSwitcher::getCurrentMode(HWND hwnd, bool verbose, std::string* detail
                       << " | TID:" << threadId << std::endl;
         }
 
-        LRESULT convResult = imeControlGetConvMode(imeWnd, 3, 30);
+        LRESULT convResult = imeControlGetConvMode(imeWnd, 3, 30, verbose);
         if (convResult >= 0) {
             DWORD convMode = static_cast<DWORD>(convResult);
             bool isNative = (convMode & IME_CMODE_NATIVE) != 0;
@@ -397,22 +401,24 @@ bool ImeSwitcher::switchTo(ImeMode targetMode, HWND hwnd, ImeMode currentMode,
                            SwitchMethod method) {
     if (!hwnd) return false;
 
+    // Set indent for sub-tree output (must be before debounce/already checks)
+    std::string savedIndent = logIndent_;
+    logIndent_ = " │  ";
+
     // Debounce: avoid switching too rapidly
     auto now = std::chrono::steady_clock::now();
     auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - lastSwitchTime_).count();
     if (elapsed < DEBOUNCE_MS && lastTargetMode_ == targetMode) {
         std::cout << logIndent_ << "└─ Debounced" << std::endl;
+        logIndent_ = savedIndent;
         return true;
     }
 
     if (currentMode == targetMode) {
         std::cout << logIndent_ << "└─ Already in target mode" << std::endl;
+        logIndent_ = savedIndent;
         return true;
     }
-
-    // Set indent for sub-tree output
-    std::string savedIndent = logIndent_;
-    logIndent_ = " │  ";
 
     std::string methodStr = (method == SwitchMethod::Shift) ? "Shift" :
                             (method == SwitchMethod::CtrlSpace) ? "Ctrl+Space" : "TSF";
