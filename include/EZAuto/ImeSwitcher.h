@@ -50,7 +50,7 @@ private:
 
     // Query conversion mode via WM_IME_CONTROL with retry
     // Returns: >= 0 = valid conversion mode, -1 = query failed
-    LRESULT imeControlGetConvMode(HWND imeWnd, int maxRetries = 3, int retryDelayMs = 30);
+    LRESULT imeControlGetConvMode(HWND imeWnd, int maxRetries = 3, int retryDelayMs = 30, bool verbose = true);
 
     // Verify switch succeeded (re-read mode after delay)
     // Prints Detect line with logIndent_, does NOT print Verify line.
