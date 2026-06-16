@@ -111,7 +111,7 @@ int main() {
     g_mainThreadId = GetCurrentThreadId();
 
     std::cout << "===================================================" << std::endl;
-    std::cout << "        EZAuto v0.1.5 - Auto IME Switcher" << std::endl;
+    std::cout << "        EZAuto v0.2.0 - Auto IME Switcher" << std::endl;
     std::cout << "===================================================" << std::endl;
 
     SetConsoleCtrlHandler(ConsoleHandler, TRUE);
@@ -181,15 +181,17 @@ int main() {
             rootHwnd = GetForegroundWindow();
         }
 
-        // Filter popup menus and tooltips: they are separate top-level windows
-        // (#32768 class) that share the same process as their parent app.
-        // Without this filter, right-click menus (e.g. MobaXterm) trigger
-        // a false "app switch" and change IME state.
+        // Filter transient/system windows that should not trigger IME switching:
+        // - #32768: popup menus (right-click menus)
+        // - tooltips_class32: tooltips
+        // - XamlExplorerHostIslandWindow: Alt+Tab task switcher (title "任务切换")
+        // - ForegroundStaging: explorer transient staging window
         std::string rootClass = getWindowClass(rootHwnd);
-        if (rootClass == "#32768" || rootClass == "tooltips_class32") {
+        if (rootClass == "#32768" || rootClass == "tooltips_class32" ||
+            rootClass == "XamlExplorerHostIslandWindow" || rootClass == "ForegroundStaging") {
             std::cout << "[" << getTimestamp() << "] Focus ── " << info.processName
                       << " (PID:" << info.processId << ", " << ctrlType << ")"
-                      << " → popup filtered" << std::endl;
+                      << " → system UI filtered" << std::endl;
             return;
         }
 
