@@ -6,6 +6,10 @@
         "powerpnt.exe": "chinese",
         "winword.exe": "chinese",
         "wpp.exe": "chinease",
-        "wps.exe": "chinease"
+        "wps.exe": "chinease",
+
+        "searchhost.exe": "chinease",
+
+        "qqmusic.exe": "chinease"
     }
 }
