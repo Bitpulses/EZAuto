@@ -82,7 +82,7 @@ static std::string hwndStr(HWND hwnd) {
     return buf;
 }
 
-// ===================== Focus State Tracker =====================
+// ### Focus State Tracker ###
 //
 // CORE PRINCIPLE: Only switch IME when the user moves to a DIFFERENT
 // top-level window (i.e., a different application). Within the same
