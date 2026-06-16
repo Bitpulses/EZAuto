@@ -66,40 +66,16 @@ Create `ezauto.json` in the same folder:
 
 ```json
 {
-    "default_mode": "chinese",
+    "default_mode": "english",
     "switch_method": "ctrl+space",
     "rules": {
-        "cmd.exe": "english",
-        "powershell.exe": "english",
-        "windowsterminal.exe": "english",
-        "conemu.exe": "english",
-        "conemuc64.exe": "english",
-        "mintty.exe": "english",
-        "putty.exe": "english",
-        "bash.exe": "english",
-        "wsl.exe": "english",
-        "ssh.exe": "english",
-        "git.exe": "english",
-        "mobaxterm.exe":"english",
-
-        "code.exe": "english",
-        "devenv.exe": "english",
-        "idea64.exe": "english",
-        "clion64.exe": "english",
-        "pycharm64.exe": "english",
-        "webstorm64.exe": "english",
-        "rider64.exe": "english",
-        "goland64.exe": "english",
-        "datagrip64.exe": "english",
-        "vim.exe": "english",
-        "nvim.exe": "english",
-        "nvim-qt.exe": "english",
-        "sublime_text.exe": "english",
-        "explorer.exe": "english",
-        "githubdesktop.exe": "english",
-
-        "excel.exe": "english"
+        "weixin.exe": "chinese",
+        "powerpnt.exe": "chinese",
+        "winword.exe": "chinese",
+        "wpp.exe": "chinease",
+        "wps.exe": "chinease"
     }
 }
+
 
 ```
