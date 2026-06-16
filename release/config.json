@@ -5,11 +5,11 @@
         "weixin.exe": "chinese",
         "powerpnt.exe": "chinese",
         "winword.exe": "chinese",
-        "wpp.exe": "chinease",
-        "wps.exe": "chinease",
+        "wpp.exe": "chinese",
+        "wps.exe": "chinese",
 
-        "searchhost.exe": "chinease",
+        "searchhost.exe": "chinese",
 
-        "qqmusic.exe": "chinease"
+        "qqmusic.exe": "chinese"
     }
 }
