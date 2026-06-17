@@ -111,7 +111,7 @@ int main() {
     g_mainThreadId = GetCurrentThreadId();
 
     std::cout << "===================================================" << std::endl;
-    std::cout << "        EZAuto v0.2.0 - Auto IME Switcher" << std::endl;
+    std::cout << "        EZAuto v0.2.1 - Auto IME Switcher" << std::endl;
     std::cout << "===================================================" << std::endl;
 
     SetConsoleCtrlHandler(ConsoleHandler, TRUE);
@@ -230,7 +230,16 @@ int main() {
 
         DWORD targetTid = GetWindowThreadProcessId(targetHwnd, nullptr);
 
-        ImeMode currentMode = switcher.getCurrentMode(targetHwnd, false);
+        // Wait for Windows to restore per-app IME state after focus change.
+        // Win11 "per-app IME state" feature restores the previous IME mode for
+        // the newly focused app asynchronously. Without this delay, getCurrentMode
+        // may read the old (pre-switch) IME state, causing false "already correct"
+        // detection. 200ms is enough for the IMM compatibility layer to sync with TSF.
+        Sleep(200);
+
+        std::string detectDetail;
+        ImeMode currentMode = switcher.getCurrentMode(targetHwnd, false, &detectDetail);
+        bool detectionReliable = (detectDetail.find("unreliable") == std::string::npos);
 
         // Update state BEFORE switching
         lastState.rootHwnd = rootHwnd;
@@ -239,7 +248,7 @@ int main() {
         std::string currentStr = (currentMode == ImeMode::Chinese ? "CN" : "EN");
         std::string targetStr = (targetMode == ImeMode::Chinese ? "CN" : "EN");
 
-        // Tree-style output with detailed info
+        // Tree-style output
         std::cout << "\n[" << getTimestamp() << "] Focus ── " << info.processName
                   << " (PID:" << info.processId << ", " << ctrlType << ")" << std::endl;
         std::cout << " ├─ Hwnd: " << hwndStr(info.hwnd) << " | Root: " << hwndStr(rootHwnd)
@@ -247,18 +256,20 @@ int main() {
         std::cout << " ├─ Class: " << getWindowClass(rootHwnd)
                   << " | Title: \"" << getWindowTitle(rootHwnd) << "\"" << std::endl;
         std::cout << " ├─ Rule: " << ruleSource
-                  << " | IME: " << currentStr << " → " << targetStr << std::endl;
+                  << " | IME: " << currentStr << " → " << targetStr
+                  << " | " << detectDetail << std::endl;
 
         if (currentMode != targetMode) {
-            std::cout << " ├─ Switch: " << currentStr << " → " << targetStr << std::endl;
-            // FIX 3: Pass detected currentMode so switchTo doesn't need to re-detect
-            // (eliminates race where GetForegroundWindow() after Sleep(50) may return
-            // a different window than the one we intended to switch).
-            bool switched = switcher.switchTo(targetMode, targetHwnd, currentMode, config.getSwitchMethod());
-            if (switched) {
-                std::cout << " └─ ✓ SWITCHED" << std::endl;
+            if (!detectionReliable) {
+                // No IME context (e.g. Snipaste) → skip to avoid interfering with the app
+                std::cout << " └─ ⊘ SKIPPED (no IME context)" << std::endl;
             } else {
-                std::cout << " └─ ✗ FAILED" << std::endl;
+                bool switched = switcher.switchTo(targetMode, targetHwnd, currentMode, config.getSwitchMethod());
+                if (switched) {
+                    std::cout << " └─ ✓ SWITCHED" << std::endl;
+                } else {
+                    std::cout << " └─ ✗ FAILED" << std::endl;
+                }
             }
         } else {
             std::cout << " └─ OK" << std::endl;
