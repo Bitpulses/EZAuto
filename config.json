@@ -1,6 +1,7 @@
 {
     "default_mode": "english",
     "switch_method": "ctrl+space",
+    
     "rules": {
         "weixin.exe": "chinese",
         "powerpnt.exe": "chinese",
