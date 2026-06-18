@@ -31,7 +31,6 @@ static std::string getTimestamp() {
     return buf;
 }
 
-// Helper: convert wide string to UTF-8
 static std::string wideToUtf8(const std::wstring& wide) {
     if (wide.empty()) return "";
     int len = WideCharToMultiByte(CP_UTF8, 0, wide.c_str(), (int)wide.size(), nullptr, 0, nullptr, nullptr);
@@ -52,7 +51,6 @@ static std::string getExeDirectory() {
     return wideToUtf8(dir);
 }
 
-// Helper: get window title (truncated for logging, UTF-8)
 static std::string getWindowTitle(HWND hwnd) {
     if (!hwnd) return "";
     wchar_t buf[256] = {};
@@ -65,7 +63,6 @@ static std::string getWindowTitle(HWND hwnd) {
     return title;
 }
 
-// Helper: get window class name (UTF-8)
 static std::string getWindowClass(HWND hwnd) {
     if (!hwnd) return "";
     wchar_t buf[256] = {};
@@ -74,7 +71,6 @@ static std::string getWindowClass(HWND hwnd) {
     return wideToUtf8(std::wstring(buf, len));
 }
 
-// Helper: format HWND as hex string
 static std::string hwndStr(HWND hwnd) {
     if (!hwnd) return "null";
     char buf[20];
@@ -82,37 +78,22 @@ static std::string hwndStr(HWND hwnd) {
     return buf;
 }
 
-// ### Focus State Tracker ###
-//
-// CORE PRINCIPLE: Only switch IME when the user moves to a DIFFERENT
-// top-level window (i.e., a different application). Within the same
-// top-level window, never touch the IME again after the initial switch.
-//
-// WHY top-level window instead of process ID?
-// - Multi-process apps like Windows Terminal have a main process
-//   (windowsterminal.exe) and child processes (openconsole.exe, cmd.exe).
-//   UIA focus events may report different PIDs within the same app,
-//   causing false "app switch" detection with process-level tracking.
-// - Using GetAncestor(GA_ROOTOWNER) gives us the actual top-level owner window,
-//   which is stable regardless of which child process has focus.
-// - This also correctly handles Chrome, VS Code, and other apps that
-//   use utility processes for different UI elements.
+// Use root window handle for stable app identity.
+// Process ID is unreliable: multi-process apps like Windows Terminal
+// report different PIDs for the same visual window.
 
 struct FocusState {
-    HWND rootHwnd = nullptr;       // Top-level window handle (stable identity)
-    std::string processName;       // For logging only
+    HWND rootHwnd = nullptr;
+    std::string processName;
 };
 
 int main() {
-    // Set console to UTF-8 mode so Unicode box-drawing characters display correctly
     SetConsoleOutputCP(CP_UTF8);
     SetConsoleCP(CP_UTF8);
 
     g_mainThreadId = GetCurrentThreadId();
 
-    std::cout << "===================================================" << std::endl;
-    std::cout << "        EZAuto v0.2.2 - Auto IME Switcher" << std::endl;
-    std::cout << "===================================================" << std::endl;
+    std::cout << "EZAuto v0.2.2" << std::endl;
 
     SetConsoleCtrlHandler(ConsoleHandler, TRUE);
 
@@ -141,18 +122,14 @@ int main() {
 
     FocusMonitor monitor;
     if (!monitor.start([&config, &switcher, &lastState, &stateMutex](const FocusInfo& info) {
-        // FIX 1: Filter UIA intermediate/artifact events.
-        // UIA sometimes fires transient focus events with PID=0 or empty processName
-        // (e.g., Type_50025 CustomControl) that share the same rootHwnd as the real
-        // target app. If we let these through, they update lastState and cause the
-        // subsequent real event to be skipped as "[SAME APP, skip]".
+        // UIA sometimes fires events with PID=0 or empty processName
+        // (e.g. Type_50025 CustomControl) that share the same rootHwnd
         if (info.processId == 0 || info.processName.empty()) {
             std::cout << "[" << getTimestamp() << "] Focus ── ARTIFACT (PID="
                       << info.processId << ") → filtered" << std::endl;
             return;
         }
 
-        // Build control type name for logging
         std::string ctrlType;
         switch (info.controlType) {
             case UIA_EditControlTypeId:    ctrlType = "Edit"; break;
@@ -170,7 +147,6 @@ int main() {
             default: ctrlType = "Type_" + std::to_string(info.controlType); break;
         }
 
-        // Get the top-level window (root owner) for stable app identity
         HWND rootHwnd = nullptr;
         if (info.hwnd) {
             rootHwnd = GetAncestor(info.hwnd, GA_ROOTOWNER);
@@ -179,11 +155,8 @@ int main() {
             rootHwnd = GetForegroundWindow();
         }
 
-        // Filter transient/system windows that should not trigger IME switching:
-        // - #32768: popup menus (right-click menus)
-        // - tooltips_class32: tooltips
-        // - XamlExplorerHostIslandWindow: Alt+Tab task switcher (title "任务切换")
-        // - ForegroundStaging: explorer transient staging window
+        // Filter system windows that shouldn't trigger switching
+        // #32768=popup menu, tooltips, XamlExplorerHostIslandWindow=Alt+Tab, ForegroundStaging=explorer
         std::string rootClass = getWindowClass(rootHwnd);
         if (rootClass == "#32768" || rootClass == "tooltips_class32" ||
             rootClass == "XamlExplorerHostIslandWindow" || rootClass == "ForegroundStaging") {
@@ -193,8 +166,6 @@ int main() {
             return;
         }
 
-        // Same-app detection: compare rootHwnd only.
-        // Only hold the mutex briefly for reading lastState.
         bool sameApp;
         {
             std::lock_guard<std::mutex> lock(stateMutex);
@@ -209,12 +180,10 @@ int main() {
             return;
         }
 
-        // Different top-level window: switch IME
         ImeMode targetMode = config.getTargetMode(info.processName, info.isPassword);
         HWND targetHwnd = GetForegroundWindow();
         if (!targetHwnd) return;
 
-        // Determine rule source for logging
         std::string ruleSource;
         if (info.isPassword) {
             ruleSource = "password → EN";
@@ -233,11 +202,8 @@ int main() {
 
         DWORD targetTid = GetWindowThreadProcessId(targetHwnd, nullptr);
 
-        // Wait for Windows to restore per-app IME state after focus change.
-        // Win11 "per-app IME state" feature restores the previous IME mode for
-        // the newly focused app asynchronously. Without this delay, getCurrentMode
-        // may read the old (pre-switch) IME state, causing false "already correct"
-        // detection. 200ms is enough for the IMM compatibility layer to sync with TSF.
+        // Win11 restores per-app IME state asynchronously after focus change.
+        // Without this delay we may read stale state.
         Sleep(200);
 
         std::string detectDetail;
@@ -247,7 +213,6 @@ int main() {
         std::string currentStr = (currentMode == ImeMode::Chinese ? "CN" : "EN");
         std::string targetStr = (targetMode == ImeMode::Chinese ? "CN" : "EN");
 
-        // Tree-style output
         std::cout << "\n[" << getTimestamp() << "] Focus ── " << info.processName
                   << " (PID:" << info.processId << ", " << ctrlType << ")" << std::endl;
         std::cout << " ├─ Hwnd: " << hwndStr(info.hwnd) << " | Root: " << hwndStr(rootHwnd)
@@ -261,8 +226,7 @@ int main() {
         bool switchSucceeded = false;
         if (currentMode != targetMode) {
             if (!detectionReliable) {
-                // No IME context (e.g. Snipaste) → skip to avoid interfering with the app
-                std::cout << " └─ ⊘ SKIPPED (no IME context)" << std::endl;
+                std::cout << " └─ ⊘ SKIPPED" << std::endl;
             } else {
                 bool switched = switcher.switchTo(targetMode, targetHwnd, currentMode, config.getSwitchMethod());
                 if (switched) {
@@ -277,8 +241,6 @@ int main() {
             switchSucceeded = true;
         }
 
-        // Update state AFTER switching (only on success or mode already correct)
-        // to ensure failed switches can be retried on the next focus event.
         if (switchSucceeded) {
             std::lock_guard<std::mutex> lock(stateMutex);
             lastState.rootHwnd = rootHwnd;
