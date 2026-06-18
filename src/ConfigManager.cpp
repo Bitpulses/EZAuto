@@ -74,10 +74,18 @@ bool ConfigManager::load(const std::string& configPath) {
             setDefaults();
             return false;
         }
-        if (!parseObject(content, pos)) {
+        // Parse into temporaries first to avoid partial state corruption
+        ImeMode tmpDefaultMode = defaultMode_;
+        SwitchMethod tmpSwitchMethod = switchMethod_;
+        std::unordered_map<std::string, ImeMode> tmpRules;
+        if (!parseObject(content, pos, tmpDefaultMode, tmpSwitchMethod, tmpRules)) {
             setDefaults();
             return false;
         }
+        // Commit only on full success
+        defaultMode_ = tmpDefaultMode;
+        switchMethod_ = tmpSwitchMethod;
+        rules_ = std::move(tmpRules);
     } catch (...) {
         std::cerr << "ConfigManager: Failed to parse config.json" << std::endl;
         setDefaults();
@@ -152,7 +160,9 @@ std::string ConfigManager::parseString(const std::string& s, size_t& pos) {
     return result;
 }
 
-bool ConfigManager::parseObject(const std::string& s, size_t& pos) {
+bool ConfigManager::parseObject(const std::string& s, size_t& pos,
+                                ImeMode& outDefaultMode, SwitchMethod& outSwitchMethod,
+                                std::unordered_map<std::string, ImeMode>& outRules) {
     ++pos; // skip '{'
     skipWhitespace(s, pos);
 
@@ -186,7 +196,7 @@ bool ConfigManager::parseObject(const std::string& s, size_t& pos) {
                     skipWhitespace(s, pos);
 
                     std::string ruleValue = parseString(s, pos);
-                    rules_[ruleKey] = stringToMode(ruleValue);
+                    outRules[ruleKey] = stringToMode(ruleValue);
 
                     skipWhitespace(s, pos);
                     if (pos < s.size() && s[pos] == ',') ++pos;
@@ -198,18 +208,28 @@ bool ConfigManager::parseObject(const std::string& s, size_t& pos) {
                 int depth = 1;
                 ++pos;
                 while (pos < s.size() && depth > 0) {
-                    if (s[pos] == '{') ++depth;
-                    else if (s[pos] == '}') --depth;
-                    ++pos;
+                    if (s[pos] == '"') {
+                        // Skip string content to avoid counting braces inside strings
+                        ++pos; // skip opening quote
+                        while (pos < s.size() && s[pos] != '"') {
+                            if (s[pos] == '\\' && pos + 1 < s.size()) ++pos; // skip escaped char
+                            ++pos;
+                        }
+                        if (pos < s.size()) ++pos; // skip closing quote
+                    } else {
+                        if (s[pos] == '{') ++depth;
+                        else if (s[pos] == '}') --depth;
+                        ++pos;
+                    }
                 }
             }
         } else if (s[pos] == '"') {
             // String value
             std::string value = parseString(s, pos);
             if (key == "default_mode") {
-                defaultMode_ = stringToMode(value);
+                outDefaultMode = stringToMode(value);
             } else if (key == "switch_method") {
-                switchMethod_ = stringToSwitchMethod(value);
+                outSwitchMethod = stringToSwitchMethod(value);
             }
         } else {
             // Skip other value types (numbers, booleans, etc.)
