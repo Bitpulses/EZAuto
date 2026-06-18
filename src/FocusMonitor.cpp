@@ -45,6 +45,11 @@ HRESULT STDMETHODCALLTYPE FocusMonitor::FocusChangedHandler::HandleFocusChangedE
 {
     if (!pSender || !callback_) return S_OK;
 
+    // Check if monitor has been stopped
+    if (running_ && !running_->load(std::memory_order_relaxed)) {
+        return S_OK;
+    }
+
     // Get RuntimeId and dedup consecutive same-element events
     std::vector<int> runtimeId = getRuntimeId(pSender);
     {
@@ -123,7 +128,10 @@ bool FocusMonitor::start(FocusCallback callback) {
 
     pHandler_ = new FocusChangedHandler(callback_);
     pHandler_->setAutomation(pAutomation_);
-    pHandler_->AddRef();
+    pHandler_->setRunningFlag(&running_);
+    // Note: do NOT AddRef here. Constructor sets refCount_=1, and
+    // AddFocusChangedEventHandler will AddRef internally. We only
+    // need to Release our own reference in stop().
 
     hr = pAutomation_->AddFocusChangedEventHandler(nullptr, pHandler_);
     if (FAILED(hr)) {
