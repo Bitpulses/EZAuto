@@ -27,7 +27,7 @@ static std::string hexStr(DWORD val) {
 static std::string hwndStr(HWND hwnd) {
     if (!hwnd) return "null";
     char buf[20];
-    snprintf(buf, sizeof(buf), "0x%llx", reinterpret_cast<unsigned long long>(hwnd));
+    snprintf(buf, sizeof(buf), "0x%llx", static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(hwnd)));
     return buf;
 }
 
@@ -128,10 +128,13 @@ ImeMode ImeSwitcher::getCurrentMode(HWND hwnd, bool verbose, std::string* detail
     // Step 2: WM_IME_CONTROL via default IME window (for TSF IMEs without direct HIMC)
     HWND imeWnd = ImmGetDefaultIMEWnd(hwnd);
     if (imeWnd) {
-        LRESULT convResult = SendMessage(imeWnd, WM_IME_CONTROL,
-                                         static_cast<WPARAM>(IMC_GETCONVERSIONMODE), 0);
+        DWORD_PTR convResultPtr = 0;
+        bool convOk = (SendMessageTimeoutA(imeWnd, WM_IME_CONTROL,
+                          static_cast<WPARAM>(IMC_GETCONVERSIONMODE), 0,
+                          SMTO_BLOCK | SMTO_ABORTIFHUNG, 2000, &convResultPtr) != 0);
+        LRESULT convResult = static_cast<LRESULT>(convResultPtr);
         // Disambiguate convResult==0: could be EN mode or query failure
-        if (convResult > 0) {
+        if (convOk && convResult > 0) {
             DWORD convMode = static_cast<DWORD>(convResult);
             bool isNative = (convMode & IME_CMODE_NATIVE) != 0;
             if (detail) {
@@ -148,10 +151,13 @@ ImeMode ImeSwitcher::getCurrentMode(HWND hwnd, bool verbose, std::string* detail
             }
             return isNative ? ImeMode::Chinese : ImeMode::English;
         }
-        if (convResult == 0) {
-            LRESULT openStatus = SendMessage(imeWnd, WM_IME_CONTROL,
-                                             static_cast<WPARAM>(IMC_GETOPENSTATUS), 0);
-            if (openStatus) {
+        if (convOk && convResult == 0) {
+            DWORD_PTR openStatusPtr = 0;
+            bool openOk = (SendMessageTimeoutA(imeWnd, WM_IME_CONTROL,
+                               static_cast<WPARAM>(IMC_GETOPENSTATUS), 0,
+                               SMTO_BLOCK | SMTO_ABORTIFHUNG, 2000, &openStatusPtr) != 0);
+            LRESULT openStatus = static_cast<LRESULT>(openStatusPtr);
+            if (openOk && openStatus) {
                 // IME is open, convMode=0 → genuine EN mode
                 if (detail) *detail = "IMECtrl NATIVE=0 convMode=0x0 [] → EN";
                 if (verbose) {
@@ -159,6 +165,13 @@ ImeMode ImeSwitcher::getCurrentMode(HWND hwnd, bool verbose, std::string* detail
                               << ": NATIVE=0 convMode=0x0 → EN" << std::endl;
                 }
                 return ImeMode::English;
+            }
+            // IME is closed (openStatus==0) — cannot reliably determine mode,
+            // fall through to GetKeyboardLayout which is also unreliable
+            if (detail) *detail = "IMECtrl IME closed → unreliable";
+            if (verbose) {
+                std::cout << logIndent_ << "├─ [Detect] IMECtrl via " << hwndStr(imeWnd)
+                          << ": IME closed, falling back to layout" << std::endl;
             }
         }
     }
@@ -224,8 +237,15 @@ bool ImeSwitcher::switchViaImeControl(HWND hwnd, ImeMode targetMode) {
     }
 
     // Get current convMode via WM_IME_CONTROL
-    LRESULT currentResult = SendMessage(imeWnd, WM_IME_CONTROL,
-                                         static_cast<WPARAM>(IMC_GETCONVERSIONMODE), 0);
+    DWORD_PTR currentResultPtr = 0;
+    LRESULT currentResult;
+    if (!SendMessageTimeoutA(imeWnd, WM_IME_CONTROL,
+                             static_cast<WPARAM>(IMC_GETCONVERSIONMODE), 0,
+                             SMTO_BLOCK | SMTO_ABORTIFHUNG, 2000, &currentResultPtr)) {
+        std::cout << logIndent_ << "├─ [ImeCtrl] SendMessageTimeout failed" << std::endl;
+        return false;
+    }
+    currentResult = static_cast<LRESULT>(currentResultPtr);
     if (currentResult < 0) {
         std::cout << logIndent_ << "├─ [ImeCtrl] Cannot read current mode (result="
                   << currentResult << ")" << std::endl;
@@ -247,9 +267,12 @@ bool ImeSwitcher::switchViaImeControl(HWND hwnd, ImeMode targetMode) {
 
     // Set conversion mode via WM_IME_CONTROL IMC_SETCONVERSIONMODE
     // Returns previous convMode on success
-    LRESULT setResult = SendMessage(imeWnd, WM_IME_CONTROL,
-                                     static_cast<WPARAM>(IMC_SETCONVERSIONMODE),
-                                     static_cast<LPARAM>(targetConvMode));
+    DWORD_PTR setResultPtr = 0;
+    SendMessageTimeoutA(imeWnd, WM_IME_CONTROL,
+                        static_cast<WPARAM>(IMC_SETCONVERSIONMODE),
+                        static_cast<LPARAM>(targetConvMode),
+                        SMTO_BLOCK | SMTO_ABORTIFHUNG, 2000, &setResultPtr);
+    LRESULT setResult = static_cast<LRESULT>(setResultPtr);
 
     std::cout << logIndent_ << "├─ [ImeCtrl] convMode " << hexStr(convMode)
               << " → " << hexStr(targetConvMode)
@@ -259,8 +282,17 @@ bool ImeSwitcher::switchViaImeControl(HWND hwnd, ImeMode targetMode) {
     // If TSF didn't accept the change, the compatibility layer value will revert.
     Sleep(200);
 
-    LRESULT recheck = SendMessage(imeWnd, WM_IME_CONTROL,
-                                   static_cast<WPARAM>(IMC_GETCONVERSIONMODE), 0);
+    LRESULT recheck;
+    {
+        DWORD_PTR recheckPtr = 0;
+        if (!SendMessageTimeoutA(imeWnd, WM_IME_CONTROL,
+                                 static_cast<WPARAM>(IMC_GETCONVERSIONMODE), 0,
+                                 SMTO_BLOCK | SMTO_ABORTIFHUNG, 2000, &recheckPtr)) {
+            std::cout << logIndent_ << "├─ [ImeCtrl] Recheck SendMessageTimeout failed" << std::endl;
+            return false;
+        }
+        recheck = static_cast<LRESULT>(recheckPtr);
+    }
     if (recheck >= 0) {
         DWORD reconvMode = static_cast<DWORD>(recheck);
         bool nowNative = (reconvMode & IME_CMODE_NATIVE) != 0;
@@ -282,24 +314,28 @@ void ImeSwitcher::simulateKeyViaMessage(HWND hwnd, SwitchMethod method) {
 
     std::cout << logIndent_ << "├─ [MsgKey] Target=" << hwndStr(targetWnd) << std::endl;
 
+    // Use SendMessageTimeout instead of SendMessage to avoid deadlocks
+    // when the target window's thread is blocked or unresponsive.
+    const UINT timeoutMs = 2000;
+
     if (method == SwitchMethod::CtrlSpace) {
         WORD scanCtrl = static_cast<WORD>(MapVirtualKeyW(VK_CONTROL, MAPVK_VK_TO_VSC));
         WORD scanSpace = static_cast<WORD>(MapVirtualKeyW(VK_SPACE, MAPVK_VK_TO_VSC));
 
         LPARAM lpCtrlDown  = MAKELPARAM(1, scanCtrl);
         LPARAM lpSpaceDown = MAKELPARAM(1, scanSpace);
-        LPARAM lpSpaceUp   = MAKELPARAM(1, scanSpace | 0xC00000);  // previous=1, transition=1
+        LPARAM lpSpaceUp   = MAKELPARAM(1, scanSpace | 0xC00000);
         LPARAM lpCtrlUp    = MAKELPARAM(1, scanCtrl  | 0xC00000);
 
-        // Use SendMessage (synchronous) instead of PostMessage (async).
-        // PostMessage queues messages, allowing real user keystrokes to interleave
-        // between Ctrl-down and Space-down, causing Space to be typed as a character.
-        // SendMessage processes each message atomically before returning, preventing
-        // the Ctrl and Space from being split apart.
-        SendMessage(targetWnd, WM_KEYDOWN, VK_CONTROL, lpCtrlDown);
-        SendMessage(targetWnd, WM_KEYDOWN, VK_SPACE,  lpSpaceDown);
-        SendMessage(targetWnd, WM_KEYUP,   VK_SPACE,  lpSpaceUp);
-        SendMessage(targetWnd, WM_KEYUP,   VK_CONTROL, lpCtrlUp);
+        DWORD_PTR result = 0;
+        SendMessageTimeoutA(targetWnd, WM_KEYDOWN, VK_CONTROL, lpCtrlDown,
+                            SMTO_BLOCK | SMTO_ABORTIFHUNG, timeoutMs, &result);
+        SendMessageTimeoutA(targetWnd, WM_KEYDOWN, VK_SPACE,  lpSpaceDown,
+                            SMTO_BLOCK | SMTO_ABORTIFHUNG, timeoutMs, &result);
+        SendMessageTimeoutA(targetWnd, WM_KEYUP,   VK_SPACE,  lpSpaceUp,
+                            SMTO_BLOCK | SMTO_ABORTIFHUNG, timeoutMs, &result);
+        SendMessageTimeoutA(targetWnd, WM_KEYUP,   VK_CONTROL, lpCtrlUp,
+                            SMTO_BLOCK | SMTO_ABORTIFHUNG, timeoutMs, &result);
 
         std::cout << logIndent_ << "├─ [MsgKey] Ctrl+Space sent to "
                   << hwndStr(targetWnd) << std::endl;
@@ -309,8 +345,11 @@ void ImeSwitcher::simulateKeyViaMessage(HWND hwnd, SwitchMethod method) {
         LPARAM lpShiftDown = MAKELPARAM(1, scanShift);
         LPARAM lpShiftUp   = MAKELPARAM(1, scanShift | 0xC00000);
 
-        SendMessage(targetWnd, WM_KEYDOWN, VK_SHIFT, lpShiftDown);
-        SendMessage(targetWnd, WM_KEYUP,   VK_SHIFT, lpShiftUp);
+        DWORD_PTR result = 0;
+        SendMessageTimeoutA(targetWnd, WM_KEYDOWN, VK_SHIFT, lpShiftDown,
+                            SMTO_BLOCK | SMTO_ABORTIFHUNG, timeoutMs, &result);
+        SendMessageTimeoutA(targetWnd, WM_KEYUP,   VK_SHIFT, lpShiftUp,
+                            SMTO_BLOCK | SMTO_ABORTIFHUNG, timeoutMs, &result);
 
         std::cout << logIndent_ << "├─ [MsgKey] Shift sent to "
                   << hwndStr(targetWnd) << std::endl;
@@ -390,6 +429,8 @@ bool ImeSwitcher::switchTo(ImeMode targetMode, HWND hwnd, ImeMode currentMode,
 
     std::string savedIndent = logIndent_;
     logIndent_ = " │  ";
+
+    std::lock_guard<std::mutex> lock(switchMutex_);
 
     // Debounce
     auto now = std::chrono::steady_clock::now();
