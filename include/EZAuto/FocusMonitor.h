@@ -18,13 +18,11 @@ public:
     void stop();
 
 private:
-    // COM event handler implementation
     class FocusChangedHandler : public IUIAutomationFocusChangedEventHandler {
     public:
         FocusChangedHandler(FocusCallback callback)
             : callback_(std::move(callback)), refCount_(1) {}
 
-        // IUnknown
         ULONG STDMETHODCALLTYPE AddRef() override {
             return InterlockedIncrement(&refCount_);
         }
@@ -44,7 +42,6 @@ private:
             return E_NOINTERFACE;
         }
 
-        // IUIAutomationFocusChangedEventHandler
         HRESULT STDMETHODCALLTYPE HandleFocusChangedEvent(IUIAutomationElement* pSender) override;
 
         void setAutomation(IUIAutomation* pAuto) { pAutomation_ = pAuto; }
@@ -56,7 +53,6 @@ private:
         long refCount_;
         const std::atomic<bool>* running_ = nullptr;
 
-        // Dedup consecutive same-element events
         std::mutex lastFocusMutex_;
         std::vector<int> lastRuntimeId_;
         static bool compareRuntimeId(const std::vector<int>& a, const std::vector<int>& b);
