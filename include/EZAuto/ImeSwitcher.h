@@ -4,6 +4,7 @@
 
 #include <chrono>
 #include <string>
+#include <mutex>
 
 class ImeSwitcher {
 public:
@@ -44,10 +45,11 @@ private:
     bool verifySwitch(HWND hwnd, ImeMode expectedMode);
 
     // ---- State ----
+    std::mutex switchMutex_;
     std::chrono::steady_clock::time_point lastSwitchTime_;
     ImeMode lastTargetMode_ = ImeMode::Chinese;
     static constexpr int DEBOUNCE_MS = 100;
 
-    // Log indentation for tree-style output
+    // Log indentation for tree-style output (local to each call, not shared state)
     std::string logIndent_;
 };
