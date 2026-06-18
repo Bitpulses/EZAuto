@@ -111,7 +111,7 @@ int main() {
     g_mainThreadId = GetCurrentThreadId();
 
     std::cout << "===================================================" << std::endl;
-    std::cout << "        EZAuto v0.2.1 - Auto IME Switcher" << std::endl;
+    std::cout << "        EZAuto v0.2.2 - Auto IME Switcher" << std::endl;
     std::cout << "===================================================" << std::endl;
 
     SetConsoleCtrlHandler(ConsoleHandler, TRUE);
