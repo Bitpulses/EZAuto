@@ -10,7 +10,7 @@
 #include <EZAuto/ImeSwitcher.h>
 #include <EZAuto/Types.h>
 
-static volatile bool g_running = true;
+static std::atomic<bool> g_running{true};
 static DWORD g_mainThreadId = 0;
 
 BOOL WINAPI ConsoleHandler(DWORD signal) {
@@ -31,17 +31,6 @@ static std::string getTimestamp() {
     return buf;
 }
 
-static std::string getExeDirectory() {
-    char path[MAX_PATH] = {};
-    GetModuleFileNameA(NULL, path, MAX_PATH);
-    std::string dir(path);
-    size_t pos = dir.find_last_of("\\/");
-    if (pos != std::string::npos) {
-        dir = dir.substr(0, pos);
-    }
-    return dir;
-}
-
 // Helper: convert wide string to UTF-8
 static std::string wideToUtf8(const std::wstring& wide) {
     if (wide.empty()) return "";
@@ -50,6 +39,17 @@ static std::string wideToUtf8(const std::wstring& wide) {
     std::string result(len, '\0');
     WideCharToMultiByte(CP_UTF8, 0, wide.c_str(), (int)wide.size(), &result[0], len, nullptr, nullptr);
     return result;
+}
+
+static std::string getExeDirectory() {
+    wchar_t wpath[MAX_PATH] = {};
+    GetModuleFileNameW(NULL, wpath, MAX_PATH);
+    std::wstring dir(wpath);
+    size_t pos = dir.find_last_of(L"\\/");
+    if (pos != std::wstring::npos) {
+        dir = dir.substr(0, pos);
+    }
+    return wideToUtf8(dir);
 }
 
 // Helper: get window title (truncated for logging, UTF-8)
@@ -78,7 +78,7 @@ static std::string getWindowClass(HWND hwnd) {
 static std::string hwndStr(HWND hwnd) {
     if (!hwnd) return "null";
     char buf[20];
-    snprintf(buf, sizeof(buf), "0x%llx", reinterpret_cast<unsigned long long>(hwnd));
+    snprintf(buf, sizeof(buf), "0x%llx", static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(hwnd)));
     return buf;
 }
 
@@ -141,8 +141,6 @@ int main() {
 
     FocusMonitor monitor;
     if (!monitor.start([&config, &switcher, &lastState, &stateMutex](const FocusInfo& info) {
-        std::lock_guard<std::mutex> lock(stateMutex);
-
         // FIX 1: Filter UIA intermediate/artifact events.
         // UIA sometimes fires transient focus events with PID=0 or empty processName
         // (e.g., Type_50025 CustomControl) that share the same rootHwnd as the real
@@ -196,7 +194,12 @@ int main() {
         }
 
         // Same-app detection: compare rootHwnd only.
-        bool sameApp = (rootHwnd != nullptr && rootHwnd == lastState.rootHwnd);
+        // Only hold the mutex briefly for reading lastState.
+        bool sameApp;
+        {
+            std::lock_guard<std::mutex> lock(stateMutex);
+            sameApp = (rootHwnd != nullptr && rootHwnd == lastState.rootHwnd);
+        }
 
         if (sameApp) {
             std::cout << "[" << getTimestamp() << "] Focus ── " << info.processName
@@ -241,10 +244,6 @@ int main() {
         ImeMode currentMode = switcher.getCurrentMode(targetHwnd, false, &detectDetail);
         bool detectionReliable = (detectDetail.find("unreliable") == std::string::npos);
 
-        // Update state BEFORE switching
-        lastState.rootHwnd = rootHwnd;
-        lastState.processName = info.processName;
-
         std::string currentStr = (currentMode == ImeMode::Chinese ? "CN" : "EN");
         std::string targetStr = (targetMode == ImeMode::Chinese ? "CN" : "EN");
 
@@ -259,6 +258,7 @@ int main() {
                   << " | IME: " << currentStr << " → " << targetStr
                   << " | " << detectDetail << std::endl;
 
+        bool switchSucceeded = false;
         if (currentMode != targetMode) {
             if (!detectionReliable) {
                 // No IME context (e.g. Snipaste) → skip to avoid interfering with the app
@@ -270,9 +270,19 @@ int main() {
                 } else {
                     std::cout << " └─ ✗ FAILED" << std::endl;
                 }
+                switchSucceeded = switched;
             }
         } else {
             std::cout << " └─ OK" << std::endl;
+            switchSucceeded = true;
+        }
+
+        // Update state AFTER switching (only on success or mode already correct)
+        // to ensure failed switches can be retried on the next focus event.
+        if (switchSucceeded) {
+            std::lock_guard<std::mutex> lock(stateMutex);
+            lastState.rootHwnd = rootHwnd;
+            lastState.processName = info.processName;
         }
     })) {
         std::cerr << "Failed to start focus monitor!" << std::endl;
