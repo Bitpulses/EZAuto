@@ -48,11 +48,13 @@ private:
         HRESULT STDMETHODCALLTYPE HandleFocusChangedEvent(IUIAutomationElement* pSender) override;
 
         void setAutomation(IUIAutomation* pAuto) { pAutomation_ = pAuto; }
+        void setRunningFlag(const std::atomic<bool>* running) { running_ = running; }
 
     private:
         FocusCallback callback_;
         IUIAutomation* pAutomation_ = nullptr;
         long refCount_;
+        const std::atomic<bool>* running_ = nullptr;
 
         // Dedup consecutive same-element events
         std::mutex lastFocusMutex_;
