@@ -7,8 +7,6 @@
 
 #pragma comment(lib, "psapi.lib")
 
-//  RuntimeId Helpers 
-
 std::vector<int> FocusMonitor::FocusChangedHandler::getRuntimeId(IUIAutomationElement* pElement) {
     std::vector<int> result;
     SAFEARRAY* pSA = nullptr;
@@ -38,24 +36,20 @@ bool FocusMonitor::FocusChangedHandler::compareRuntimeId(const std::vector<int>&
     return true;
 }
 
-//  FocusChangedHandler 
-
 HRESULT STDMETHODCALLTYPE FocusMonitor::FocusChangedHandler::HandleFocusChangedEvent(
     IUIAutomationElement* pSender)
 {
     if (!pSender || !callback_) return S_OK;
 
-    // Check if monitor has been stopped
     if (running_ && !running_->load(std::memory_order_relaxed)) {
         return S_OK;
     }
 
-    // Get RuntimeId and dedup consecutive same-element events
     std::vector<int> runtimeId = getRuntimeId(pSender);
     {
         std::lock_guard<std::mutex> lock(lastFocusMutex_);
         if (!runtimeId.empty() && compareRuntimeId(runtimeId, lastRuntimeId_)) {
-            return S_OK;  // Skip consecutive duplicate
+            return S_OK;
         }
         lastRuntimeId_ = runtimeId;
     }
@@ -63,12 +57,10 @@ HRESULT STDMETHODCALLTYPE FocusMonitor::FocusChangedHandler::HandleFocusChangedE
     FocusInfo info;
     info.runtimeId = runtimeId;
 
-    // Get process ID (UIA returns int, not DWORD)
     int procId = 0;
     pSender->get_CurrentProcessId(&procId);
     info.processId = static_cast<DWORD>(procId);
 
-    // Get process name from process ID
     HANDLE hProcess = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, info.processId);
     if (hProcess) {
         wchar_t processPath[MAX_PATH] = {};
@@ -83,20 +75,16 @@ HRESULT STDMETHODCALLTYPE FocusMonitor::FocusChangedHandler::HandleFocusChangedE
         CloseHandle(hProcess);
     }
 
-    // Get control type
     pSender->get_CurrentControlType(&info.controlType);
 
-    // Check if password field
     BOOL isPassword = FALSE;
     pSender->get_CurrentIsPassword(&isPassword);
     info.isPassword = (isPassword == TRUE);
 
-    // Get native window handle
     UIA_HWND uiaHwnd = nullptr;
     pSender->get_CurrentNativeWindowHandle(&uiaHwnd);
     info.hwnd = reinterpret_cast<HWND>(uiaHwnd);
 
-    // If no hwnd from element, try foreground window
     if (!info.hwnd) {
         info.hwnd = GetForegroundWindow();
     }
@@ -104,8 +92,6 @@ HRESULT STDMETHODCALLTYPE FocusMonitor::FocusChangedHandler::HandleFocusChangedE
     callback_(info);
     return S_OK;
 }
-
-// FocusMonitor 
 
 FocusMonitor::FocusMonitor() = default;
 
@@ -129,9 +115,6 @@ bool FocusMonitor::start(FocusCallback callback) {
     pHandler_ = new FocusChangedHandler(callback_);
     pHandler_->setAutomation(pAutomation_);
     pHandler_->setRunningFlag(&running_);
-    // Note: do NOT AddRef here. Constructor sets refCount_=1, and
-    // AddFocusChangedEventHandler will AddRef internally. We only
-    // need to Release our own reference in stop().
 
     hr = pAutomation_->AddFocusChangedEventHandler(nullptr, pHandler_);
     if (FAILED(hr)) {
