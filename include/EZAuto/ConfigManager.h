@@ -29,7 +29,9 @@ private:
     // Minimal JSON parsing helpers
     void skipWhitespace(const std::string& s, size_t& pos);
     std::string parseString(const std::string& s, size_t& pos);
-    bool parseObject(const std::string& s, size_t& pos);
+    bool parseObject(const std::string& s, size_t& pos,
+                     ImeMode& outDefaultMode, SwitchMethod& outSwitchMethod,
+                     std::unordered_map<std::string, ImeMode>& outRules);
     static ImeMode stringToMode(const std::string& modeStr);
     static SwitchMethod stringToSwitchMethod(const std::string& methodStr);
 };
