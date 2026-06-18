@@ -26,7 +26,7 @@ void ConfigManager::setDefaults() {
         {"idea64.exe", ImeMode::English},
         {"clion64.exe", ImeMode::English},
         {"pycharm64.exe", ImeMode::English},
-        {"notepad++.exe", ImeMode::English},
+        {"notepad.exe", ImeMode::English},
         {"vim.exe", ImeMode::English},
         {"nvim.exe", ImeMode::English},
         {"nvim-qt.exe", ImeMode::English},
